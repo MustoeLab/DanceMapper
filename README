@@ -1,0 +1,32 @@
+============================
+BernoulliMixture Clustering
+============================
+============================
+Anthony Mustoe
+Weeks Lab
+April 2017
+Contact: amustoe@unc.edu
+============================
+
+
+Dependencies
+------------
+- python 2.7, numpy
+
+- cython (developed using v0.23)
+
+
+Installation
+------------
+- Compile cython routine by running:
+    python setup.py build_ext --inplace
+
+
+Running
+-------
+-Run filterReads.py with '-h' flag for a description of commandline options
+
+
+
+
+
