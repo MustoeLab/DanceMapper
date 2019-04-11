@@ -8,7 +8,7 @@ from collections import deque
 class ConvergenceError(Exception):
     """Exception class for convergence errors encountered during EM fitting"""
     
-    def __init__(self, msg, step, p, mu):
+    def __init__(self, msg, step, p, mu, muidx=None):
         """msg = identifying message
         step = abortion step
         p = population parameters at time of abortion
@@ -18,10 +18,24 @@ class ConvergenceError(Exception):
         self.step = step
         self.p = p
         self.mu = mu
+        self.muidx = muidx
 
-    def __str__(self):
-        return "{0} :: aborted at step {1}".format(self.msg, self.step)
+
+    def __str__(self, idxmap = None):
         
+        msg = self.msg
+        if self.muidx is None:
+            msg += " :: aborted at step {1}".format(self.step)
+        elif idxmap is None:
+            msg += " at col {0} :: aborted at step {1}".format(self.muidx, self.step)
+        else:
+            ntnum = idxmap[self.muidx]+1
+            msg += " at nt {0} :: aborted at step {1}".format(ntnum, self.step)
+           
+        return msg
+
+
+
 
 class ConvergenceMonitor(object):
     """Object to monitor convergence of EM algorithm"""
@@ -67,41 +81,53 @@ class ConvergenceMonitor(object):
             self.mu = np.copy(mu)
             return
         
-        
         if max(np.max(pd), np.max(md)) < self.convergeThresh:
+            self.postConvergeCheck(p, mu)
             self.converged=True
         
         self.p[:] = p[:]
         self.mu[:] = mu[:]
 
 
+
     def checkParamBounds(self, p, mu):
         """Make sure p and mu params are within allowed bounds"""
+        
         minp = np.min(p)
         if minp < 0.001:
-            raise ConvergenceError('Low Population = {0}'.format(minp),self.step,p,mu)
+            raise ConvergenceError('Low Population = {0}'.format(minp), self.step, p, mu)
 
-
-        minmu = np.min(mu)
-        if minmu < 1e-5:
-            raise ConvergenceError('Low Mu = {0}'.format(minmu),self.step,p,mu)
-
-        maxmu = np.max(mu)
-        if maxmu > 0.3:
-            raise ConvergenceError('High Mu = {0}'.format(maxmu),self.step,p,mu)
-
+        # compute columns with at least one mu param < 1e-5
+        minidx = np.sum(mu < 1e-5, axis=0) > 0
+        if np.sum(minidx) > 0:
+            idx = np.where(minidx)
+            print 'len = {0}, idx = {1}'.format(len(minidx), idx)
+            minmu = np.min(mu[:,idx])
+            raise ConvergenceError('Low Mu = {0}'.format(minmu),self.step,p,mu,idx)
+        
+        maxidx = np.sum(mu > 0.3, axis=0) > 0
+        if np.sum(maxidx) > 0:
+            idx = np.where(maxidx)
+            print 'len = {0}, idx = {1}'.format(len(maxidx), idx)
+            maxmu = np.max(mu[:,idx])
+            raise ConvergenceError('High Mu = {0}'.format(maxmu),self.step,p,mu,idx)
+        
 
     def checkDegenerate(self, p, mu):
         """Check to see if converging to degenerate parameters
         Uses trend of rmsdiff to prematurely terminate 
         """
+        
+        # cutoff for calculating precentile containing all but 5 most reactive nts
+        nt5cut = 100*(mu.shape[1]-5.0)/mu.shape[1] 
 
         rmsdiff = 10
         for i,j in itertools.combinations(range(mu.shape[0]), 2):
-            d = (mu[i,:] - mu[j,:])**2
-            # ignore 5 nts with highest diff
-            p95 = np.percentile(d, 100*(mu.shape[1]-5.0)/mu.shape[1])
-            diff = RMS(d[d<=p95])
+            
+            d = np.square(mu[i,:] - mu[j,:])
+            nt5value = np.percentile(d, nt5cut)
+            diff = np.sqrt( np.mean( d[d<=nt5value] ) )
+            
             if diff < rmsdiff:
                 rmsdiff = diff
         
@@ -109,15 +135,37 @@ class ConvergenceMonitor(object):
 
         self.rms = rmsdiff
         self.rmshistory.append(change)
+        
+        #print "{0} rms {1:.1e} {2:.1e}".format(self.step, rmsdiff, np.sum(self.rmshistory))
+
         if len(self.rmshistory) > 50:
             self.rmshistory.popleft()
-            
-            if rmsdiff < 0.001 and np.sum(self.rmshistory)<0:
-                #print p95, np.sum(d<=p95), len(d)
 
+            if rmsdiff < 0.005 and np.sum(self.rmshistory)<0:
+                #print p95, np.sum(d<=p95), len(d)
                 raise ConvergenceError('Degenerate Mu: RMS diff={0:.4f}'.format(rmsdiff),self.step,p,mu)
 
         
+    def postConvergeCheck(self, p,mu):
+        
+        # compute columns with at least one mu param < 1e-4
+        minidx = np.sum(mu < 1e-4, axis=0) > 0
+        if np.sum(minidx) > 0:
+            print 'len {0}'.format(len(minidx))
+            minidx = np.where(minidx)
+            print 'idx {0}'.format(minidx)
+            raise ConvergenceError('Low Converged Mu',self.step,p,mu,minidx)
+        
+        # compute columns with at least one mu param < 1e-4
+        maxidx = np.sum(mu > 0.3, axis=0) > 0
+        if np.sum(maxidx) > 0:
+            print 'len {0}'.format(len(maxidx))
+            maxidx = np.where(maxidx)
+            print 'idx {0}'.format(maxidx)
+            raise ConvergenceError('High Converged Mu',self.step,p,mu,maxidx)
+        
+
+
 
 
 class BernoulliMixture(object):
@@ -150,20 +198,20 @@ class BernoulliMixture(object):
 
 
  
-    def readMatrix(self, fname, maxmissing=3, ignoreCols=[], **kwargs):
-        """Read in primary data matrix and perfrom filtering
-        Indices in ignoreCols are deleted from matrix.
-        kwargs passed on to setActiveNts(minsig, bgarray, maxbg, minsig_bg)
+    def readMatrix(self, fname, maxmissing=3, invalidcols=[], **kwargs):
+        """Read in primary data matrix and perfom filtering
+        Indices in invalidcols are deleted from matrix.
+        kwargs passed on to initializeActiveNts(minrx, bgarray, maxbg, minrx_bg)
         """
         
         rawreads = np.loadtxt(fname, dtype=np.int8)
         
         # delete unwanted columns
-        ignoremask = np.ones(rawreads.shape[1], dtype=np.bool_)
-        for x in ignoreCols:
-            ignoremask[x] = False
+        validmask = np.ones(rawreads.shape[1], dtype=np.bool_)
+        for x in invalidcols:
+            validmask[x] = False
         
-        rawreads = rawreads[:,ignoremask]
+        rawreads = rawreads[:,validmask]
         
         # now identify positions with no data and filter out incomplete reads
         nodata = (rawreads > 1)
@@ -180,29 +228,36 @@ class BernoulliMixture(object):
         self.seqlen = self.reads.shape[1]
         self.active_mask = np.ones(self.seqlen, dtype=np.bool_)
 
-        self.columnindices = np.arange(ignoremask.size)[ignoremask]
-        
+        self.columnindices = np.where(validmask)[0]
+        self.invalidindices = np.where(np.invert(validmask))[0]
+
         # manually garbage collect big arrays just in case
         del nodata
         del rawreads
         
-        self.setActiveNts(**kwargs)
+        self.initializeActiveNts(**kwargs)
 
 
-    def setActiveNts(self, minsig=0.002, bgarray=None, maxbg=0.01, minsig_bg=0.002, **kwargs):
+    def initializeActiveNts(self, inactivecols=[], minrx=0.002, bgarray=None, 
+                            maxbg=0.01, minrxbg=0.002, verbal = True, **kwargs):
         """Apply quality filters to eliminate noisy nts from EM fitting
-        minsig    = minimum signal (react. rate)
+        inactivents = list of columns to set to inactive
+        minrx    = minimum signal (react. rate)
         bgarray   = array (or txt file of array) of background signal
         maxbg     = maximum allowable background signal
-        minsig_bg = minimum signal above background
+        minrxbg = minimum signal above background
+	verbal    = keyword to control printing of inactive nts
         """
         
-        # comute reactivity rate
+        # compute reactivity rate
         sig = np.sum(self.reads, axis=0, dtype=np.float)
         sig = sig/(sig + np.sum(self.ireads, axis=0))
         
-        active = sig >= minsig
+        active = sig >= minrx
         
+        for c in inactivecols:
+            active[c] = False
+
         if bgarray is not None:
             if isinstance(bgarray, str):
                 bgarray = np.loadtxt(bgarray)
@@ -210,12 +265,12 @@ class BernoulliMixture(object):
             bg = bgarray[self.columnindices]
             
             active = active & (bg < maxbg)
-            active = active & ( (sig-bg) >= minsig_bg)
+            active = active & ( (sig-bg) >= minrxbg)
         
 
         inactive = np.invert(active)
 
-        if np.sum(active) != len(active):
+	if np.sum(active) != len(active) and verbal:
             print 'Inactive nts :: {0}'.format(self.columnindices[inactive]+1)
 
         self.inactive_reads = self.reads[:,inactive]
@@ -224,7 +279,40 @@ class BernoulliMixture(object):
         self.reads = self.reads[:,active]
         self.ireads = self.ireads[:,active]
         self.active_mask = active
+    
+    
+    def setColumnInactive(self, column):
+        """Add column to the list of inactive columns"""
+        
+        # update inactives
+        dim = (self.inactive_reads.shape[0], self.inactive_reads.shape[1]+1)
+        
+        inact_copy = np.zeros(dim, dtype=np.bool_)
+        inact_copy[:,:column]   = self.inactive_reads[:,:column]
+        inact_copy[:,column]    = self.reads[:,column]
+        inact_copy[:,column+1:] = self.inactive_reads[:,column:]
+        self.inactive_reads = inact_copy
 
+        inact_copy = np.zeros(dim, dtype=np.bool_)
+        inact_copy[:,:column]   = self.inactive_ireads[:,:column]
+        inact_copy[:,column]    = self.ireads[:,column]
+        inact_copy[:,column+1:] = self.inactive_ireads[:,column:]
+        self.inactive_ireads = inact_copy
+        
+        
+        # update reads and ireads
+        mask = np.ones(self.reads.shape[1], dtype=np.bool_)
+        mask[column] = False
+        self.reads = self.reads[:, mask]
+        self.ireads = self.ireads[:, mask]
+        
+
+        # update the global masks
+        self.inactive_mask[column] = True
+        self.active_mask[column] = False
+
+
+        
 
     def mu2log(self, mu):
         """Compute log2 matrices for numerically safe probability calculations"""
@@ -354,7 +442,7 @@ class BernoulliMixture(object):
                 mu_em[i,:] = np.sum( self.reads * W[:,i].reshape((self.numreads, 1)) , axis=0) 
                 mu_em[i,:] += a_arr[i,:]-1 # numerator contribution of prior
                 mu_em[i,:] /= ni + a_arr[i,:] + b_arr[i,:] - 2  
-        
+#######       
             # compute updated reactivity profiles, accounting for missing data
             # Note :: this step is slow! contributes Nmod*(3*Nread*Seqlen+2*Nread) 
             #for i in xrange(num_models):
@@ -388,28 +476,37 @@ class BernoulliMixture(object):
         
         W = np.empty(Wactive.shape)
         inactmu = np.zeros((self.components, self.inactive_reads.shape[1]))
-        logMu = logMuC = np.zeros(inactmu.shape)
+        logMu  = np.zeros(inactmu.shape)
+        logMuC = np.zeros(inactmu.shape)
         newp = np.zeros(self.components)
         
+        # allow inactive Mu parameters to converge over 10 iterations
         for t in xrange(10):
             
-            if t>0: logMu, logMuC = self.mu2log(inactmu)
-            
-            # compute weights (for t=0. logM=logMuC=0, so W=Wactive)
+            # this is log2 W matrix computed from active reads
             W[:] = Wactive 
-            for i in xrange(self.components):
-                W[:,i] += np.sum(logMu[i,:]*self.inactive_reads, axis=1) 
-                W[:,i] += np.sum(logMuC[i,:]*self.inactive_ireads, axis=1)
+            
+            if t>0: # if we Mu estimates...
+                logMu, logMuC = self.mu2log(inactmu)
+                
+                # update W incorporating inactive parameters
+                for i in xrange(self.components):
+                    W[:,i] += np.sum(logMu[i,:]*self.inactive_reads, axis=1) 
+                    W[:,i] += np.sum(logMuC[i,:]*self.inactive_ireads, axis=1)
+            
+            # need to covert W to regular units, and normalize
             W = np.exp2(W)
             W /= W.sum(axis=1).reshape((self.numreads, 1))
             
-            # update Mu pars
+            # update inactive Mu pars
             for i in xrange(self.components):
                 ni = np.sum(W[:,i])
                 inactmu[i,:] = np.sum(self.inactive_reads*W[:,i].reshape((self.numreads, 1)), axis=0)
-                inactmu[i,:] /= ni
+                inactmu[i,:] += 1       # +1 corresponds to beta(2,2) prior, to prevent 0 errors 
+                inactmu[i,:] /= ni + 2  # +2 corresponds to beta(2,2) prior, to prevent 0 errors 
                 newp[i] = ni/self.numreads 
         
+        # look at whether the populations are shifting a lot; if so, this is a problem.
         popdiff = np.max(newp - self.p)
         if popdiff > 0.01:
             raise ConvergenceError('Significant Inactive P shift = {0}'.format(popdiff),'term', self.p, self.mu)
@@ -447,11 +544,18 @@ class BernoulliMixture(object):
         return None, None if no valid solution found
         """
         
+        ### Need to redesign return functionality
+        ### Call this from a different wrapper function
+        #       if no solution is found, other function can update inactive
+        #       and recall this function... Repeat, etc...
+        #
+        #   How to trace back if at 3 components, for example? 
+        #       Somehow need to store prior solution tree 
 
         suboptimal = []
         minfit = None         
         mincount = 1
-
+        
         for t in xrange(trials):
             
             if verbal:
@@ -464,7 +568,7 @@ class BernoulliMixture(object):
 
             except ConvergenceError as e:
                 if verbal:
-                    print e
+                    print e.__str__(self.columnindices[self.active_mask])
                 continue
 
             fit = (self.computeLogLike(p_em, mu_em), p_em, mu_em)
@@ -596,6 +700,9 @@ class BernoulliMixture(object):
             if bic-fitlist[-2][1] > -10:
                 break
         
+
+        # if maxcomponents is best fit, add empty item to fitlist 
+        # so that [-2] indexing below still works
         if c==maxcomponents and bic-fitlist[-2][1]<=-10:
             fitlist.append(())
 
@@ -761,37 +868,6 @@ class BernoulliMixture(object):
         
         return p_err, mu_err
     
-
-    def synbootstrap(self, n=100):
-        
-        raise AttributeError('Currently Deprecataed')
-
-        boot = SynBernoulliMixture(p=self.p, mu=self.mu)
-        psamp = np.zeros((n, self.components))
-        musamp = np.zeros((n, self.components, self.seqlen))
-        
-        conv = np.ones(n, dtype=bool)
-
-        for i in xrange(n):
-
-            boot.generateReads(self.numreads)
-            
-            try:
-                pi,mui = self.random_init_params(self.p.size)
-                p,mu = boot.fitEM(pi, mui, verbal=True)
-                idx = alignParams(mu, self.mu)
-
-                psamp[i,:] = p[idx]
-                musamp[i,:,:] = mu[idx, :]
-            except ConvergenceError:
-                conv[i]=False
-                pass
-
-        pstd = np.std(psamp[conv,:], axis=0)
-        mustd = np.std(musamp[conv,:,:], axis=0)
-
-        return  np.sum(conv), pstd, mustd
- 
 
     def printParams(self):
         """Print out model parameters"""
@@ -1020,3 +1096,5 @@ def printParams(p, mu, idx=None):
 
 
 
+
+# vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
