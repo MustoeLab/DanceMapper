@@ -1,25 +1,13 @@
-# cython: boundscheck=False, wraparound=False, nonecheck=False
+#cython: boundscheck=False, wraparound=False, nonecheck=False, cdivision=True
 
 
 from libc.math cimport log
 from libc.stdio cimport FILE, fopen, fclose, getline
-from libc.stdlib cimport atoi
-from libc.string cimport strsep, strcmp
 
 import numpy as np
 cimport numpy as np
 
-
-
-###########################################################################
-# Define READ object
-
-cdef struct READ:
-    int start
-    int stop
-    char* read
-    char* muts
-    char* qual
+from readMutStrings cimport READ, parseLine, fillReadMut, incrementArrays
 
 
 ###########################################################################
@@ -68,7 +56,7 @@ def fillReadMatrices(str inputFile, int seqlen, int mincoverage):
         
 
         try:
-            r = parseLine(line)
+            r = parseLine(line, 3)
             if r.read == NULL:
                 raise IndexError()
             elif r.stop >= seqlen:
@@ -104,81 +92,19 @@ def fillReadMatrices(str inputFile, int seqlen, int mincoverage):
 
 
 cdef int fillReadMutArrays(np.int8_t[:] readstr, np.int8_t[:] mutstr, READ r):
-    """fill readstr (invert so that 1 = no data) and mutstr from Read r"""
+    """fill readstr and mutstr from Read r"""
         
     cdef int i, idx
-    cdef coverage = 0
+    cdef int coverage = 0
     
     for i in xrange(r.stop - r.start + 1):
         idx = i+r.start       
-        readstr[idx] = r.read[i]-48
-        mutstr[idx] = r.muts[i]-48
-        coverage += r.read[i]-48
+        readstr[idx] = r.read[i]-r.subcode
+        mutstr[idx] = r.muts[i]-r.subcode
+        coverage += r.read[i]-r.subcode
             
     return coverage
     
-
-
-##################################################################################
-
-cdef READ parseLine(char* line):
-    # accessory function for fillMatrices
-    # uses c functions to read through line; avoids having to use python split
-    # which outputs python array and slows things down
-
-    cdef READ r
-    cdef int i
-
-    # init token values
-    cdef char* running = line
-    cdef char* token = strsep(&running, " \t")
-    cdef int tokindex = 1
-    cdef int valueset = 0
-    
-    cdef fileformat = 3
-
-    # pop off leader information so that token = r.start
-    for i in xrange(2):
-        token = strsep(&running, " \t")
-    
-   
-    while token:
-        
-        if tokindex == 1:
-            r.start = atoi(token)
-
-        elif tokindex == 2:
-            r.stop = atoi(token)
-        
-        elif fileformat==3:
-            if tokindex==3 and strcmp(token, "INCLUDED") != 0:
-                break
-            elif tokindex == 6:
-                r.read = token
-            elif tokindex == 7:
-                r.muts = token
-                valueset = 1
-                break
-        else:
-            if tokindex == 3:
-                r.read = token
-            elif tokindex == 4:
-                r.muts = token
-                valueset = 1
-                break
-        
-        token = strsep(&running, " \t")
-        tokindex+=1
-    
-
-    if valueset != 1 or r.start >= r.stop:
-        r.start = 0
-        r.stop = 0
-        r.read = NULL
-    
-
-    return r
-
 
 
 ##################################################################################
@@ -289,7 +215,62 @@ def maximization(double[:] p, double[:,::1] mu, double[:,::1] readWeights,
             mu[d,col] /= positionweight[d,j]
 
 
- 
 
+##################################################################################
+
+
+def fillRINGMatrix(int[:,::1] read_arr, int[:,::1] comut_arr, int[:,::1] inotj_arr,
+                   char[:,::1] reads, char[:,::1] mutations, double[:] weights, 
+                   int maxreads, int window):
+    
+
+    # handle 'no limit' on maxreads
+    if maxreads < 0:
+        maxreads = reads.shape[0]
+
+
+    cdef int i, j, n, idx
+
+    # initialize read/mut arrays that are filled by fillReadMut
+    cdef int[:] f_read = np.zeros( reads.shape[1]+1, dtype=np.intc)
+    cdef int[:] f_mut = np.zeros( reads.shape[1]+1, dtype=np.intc)
+
+    # initialize the READ object which we'll send to fillReadMut
+    cdef READ R
+    R.start = 0
+    R.stop = reads.shape[1] - 1
+    R.subcode = 0
+    
+
+    # quick but memory inefficent way to generate random numbers
+    cdef int[:] readindices = np.where(np.random.random(weights.shape[0])<=weights)[0].astype(np.intc)
+    
+
+    # subsample if exceeds maxreads
+    if maxreads>0 and len(readindices) > maxreads:
+        readindices = np.random.choice(readindices, maxreads, replace=False)
+    
+
+    for n in xrange(len(readindices)):
+        
+        idx = readindices[n]
+
+        # update the read/muts struct to point to current read
+        R.read = &reads[idx,0]
+        R.muts = &mutations[idx,0]
+        
+        # fill f_read and f_mut, with mincoverage=0 since reads have already been filtered
+        fillReadMut(f_read, f_mut, R, window, 0)
+        
+        # increment read_arr, comut_arr, inotj_arr
+        incrementArrays(read_arr, comut_arr, inotj_arr, f_read, f_mut)
+
+
+    return len(readindices)
+
+
+
+
+ 
 
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4

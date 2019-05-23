@@ -6,6 +6,8 @@ from collections import deque
 from ReactivityProfile import ReactivityProfile
 from BernoulliMixture import *
 
+from ringmapper import RINGexperiment
+
 import accessoryFunctions
 
 
@@ -32,19 +34,25 @@ class EnsembleMap(object):
         self.invalid_columns=None
 
         # info about the reads
+        self.seqlen = None
         self.ntindices = None
         self.sequence = None
-        self.seqlen = None
         self.numreads = None
         
+
         # contains final BMsolution, if fitting done
         self.BMsolution = None
         
         if profilefile is not None:
             self.profile = ReactivityProfile(profilefile)
-            self.seqlen = len(self.profile.sequence)
+            self.sequence = ''.join(self.profile.sequence)
+            self.seqlen = len(self.sequence)
             self.ntindices = self.profile.nts
+        
 
+        elif seqlen is not None:
+            self.seqlen = seqlen
+            self.ntindices = np.arange(seqlen)
 
         if inpfile is not None:
             self.readData(inpfile, **kwargs)
@@ -270,27 +278,6 @@ class EnsembleMap(object):
         return assignments
 
 
-    def stochasticClassification(self):
-        """NOT WORKING"""
-        raise RuntimeError("Read classification not implemented")
-
-
-        W = computePosteriorProb(self.p, self.mu[:, self.active_mask])
-        
-        cumW = np.zeros((W.shape[0], W.shape[1]+1)) 
-        cumW[:,1:] = np.cumsum(W, axis=1)
-
-        r = np.random.random(self.numreads)
-        assignments = np.ones(self.numreads, dtype=np.int8)*-1
-    
-        for i in xrange(len(p)):
-            mask = (cumW[:,i] <= r) & (r < cumW[:,i+1])
-            assignments[mask] = i
-        
-        assert np.sum(assignments<0) == 0
-
-        return assignments
-
     
     def compute1ComponentModel(self):
         """Compute the null model (i.e. mixture of one)"""
@@ -393,7 +380,7 @@ class EnsembleMap(object):
                 fitlist.append(BM)
 
                 if writeintermediate is not None:
-                    BM.writeModel('{0}-{1}-{2}.txt'.format(writeintermediate, components, tt))
+                    BM.writeModel('{0}-intermediate-{1}-{2}.bm'.format(writeintermediate, components, tt))
                 
                 if bestfit is None:
                     bestfit = BM
@@ -501,7 +488,11 @@ class EnsembleMap(object):
         if verbal:  
             print("\n 1-component BIC = {0:.1f}".format(overallBestBM.BIC))
             print('*'*50+'\n')
+        
 
+        if writeintermediate is not None:
+            overallBestBM.writeModel('{0}-intermediate-1.bm'.format(writeintermediate))
+ 
 
 
         # iterate through each model size
@@ -561,15 +552,15 @@ class EnsembleMap(object):
         print "\n{0} fits found for {1}-component model".format(len(fitlist), bestfit.pdim)
         print "Best Fit BIC = {0:.1f}".format( bestfit.BIC )
         
-        print "Deviation of fits from best parameters:"
+        print("Deviation of fits from best parameters:")
         
         for i,f in enumerate(fitlist):
 
             pdiff, mudiff = bestfit.modelDifference(f, func=np.max)
                  
-            print "\tModel {0}  BIC={1:.1f}  Max_dP={2:.4f}  Max_dMu={3:.4f}".format(i+1, f.BIC, pdiff, mudiff)
+            print("\tModel {0}  BIC={1:.1f}  Max_dP={2:.4f}  Max_dMu={3:.4f}".format(i+1, f.BIC, pdiff, mudiff))
 
-        print '*'*50, '\n'
+        print('*'*65+'\n')
  
 
 
@@ -769,13 +760,15 @@ class EnsembleMap(object):
 
 
 
-    def writeModelParams(self, output):
-        """Print out model parameters"""
+    def writeReactivities(self, output):
+        """Print out model reactivities
+        self.profile must be defined
+        """
         
         model = self.BMsolution
 
         if self.profile is None:
-            model.writeModelParams(output)
+            print('Cannot compute reactivities because profile was not provided')
             return
         
         # compute normalized parameters
@@ -820,6 +813,57 @@ class EnsembleMap(object):
             
 
 
+    def readModelFromFile(self, fname):
+        """Read in BMsolution from BM file object"""
+        
+
+        self.BMsolution = BernoulliMixture()
+        self.BMsolution.readModelFromFile(fname)
+
+        # check to make sure the active, inactive are the same
+        if not np.array_equal(self.active_columns, self.BMsolution.active_columns) or \
+               np.array_equal(self.inactive_columns, self.BMsolution.inactive_columns):
+            sys.stderr.write('active_columns in BMsolution and EnsembleMap object are different!\n')
+            sys.stderr.write('Updating EnsembleMap columns to BMsolution values\n')
+            
+            self.setColumns(activecols=self.BMsolution.active_columns, 
+                            inactivecols=self.BMsolution.inactive_columns)    
+        
+
+
+
+    def computeRINGs(self, modelnum, window=1, maxreads=-1, corrtype='apc', verbal=True):
+        """For the specified modelnum of BMsoluton, sample reads stochasticaly
+        return RINGexperiment"""
+        
+        ring = RINGexperiment(arraysize = self.seqlen,
+                              corrtype = corrtype,
+                              verbal = verbal)
+
+        ring.sequence = self.sequence
+
+        
+        read  = np.zeros( (self.seqlen, self.seqlen), dtype=np.int32)
+        comut = np.zeros( (self.seqlen, self.seqlen), dtype=np.int32)
+        inotj = np.zeros( (self.seqlen, self.seqlen), dtype=np.int32)
+        
+        weights = self.BMsolution.computePosteriorProb(self.reads, self.mutations)
+        
+        b = weights[modelnum,:]
+        
+        nsel = accessoryFunctions.fillRINGMatrix(read, comut, inotj, 
+                                                 self.reads, self.mutations, 
+                                                 weights[modelnum, :], maxreads, window) 
+        ring.window = window
+        ring.ex_readarr = read
+        ring.ex_comutarr = comut
+        ring.ex_inotjarr = inotj
+        
+        print('{0} reads selected for RING analysis for component {1}'.format(nsel, modelnum))
+
+        return ring
+
+
 
 
 ####################################################################################
@@ -828,27 +872,80 @@ class EnsembleMap(object):
 def parseArguments():
 
     parser = argparse.ArgumentParser(description = "Fit BM model to data")
-
-    parser.add_argument('inputFile', type=str, help='Path to file')
     
-    parser.add_argument('--profile', type=str, help='ShapeMapper profile')
+    optional = parser._action_groups.pop()
+   
 
-    parser.add_argument('--outputFile', type=str, help='Path to output')
-    
-    parser.add_argument('--maxcomponents', type=int, default=5, help='Maximum number of components to fit (default=5)')
-    
-    parser.add_argument('--trials', type=int, default=10, help='Maximum number of fitting trials at each component number (default=10)')
-    
-    parser.add_argument('--badcol_cutoff', type=int, default=2, help='Inactivate column after it causes a bad solution X number of times (default=2)')
+    ############################################################
+    # required arguments
 
-    parser.add_argument('--suppressVerbal', action='store_false', help='Suppress verbal output')
-
-    parser.add_argument('--mincoverage', type=int, help='Minimum coverage (integer number of nts) required for read to be included in cacluations')
+    required = parser.add_argument_group('required arguments')
+    required.add_argument('--modified_parsed', help='Path to modified parsed.mut file')
+    required.add_argument('--profile', help='Path to profile.txt file')
     
-    parser.add_argument('--writeintermediates', type=str, help='Write each BM solution to file with specified prefix. Will be saved as prefix-1-1.bm, prefix-2-1.bm, ...')
 
+    ############################################################
+    # Quality filtering arguments
+    
+    quality = parser.add_argument_group('quality filtering options')
+    quality.add_argument('--mincoverage', type=int, help='Minimum coverage (integer number of nts) required for read to be included in cacluations')
+     
+    ############################################################
+    # Fitting options
+
+    fitopt = parser.add_argument_group('options for fitting data')
+    fitopt.add_argument('--fit', action='store_true', help='Flag specifying to fit data')
+    fitopt.add_argument('--maxcomponents', type=int, default=5, help='Maximum number of components to fit (default=5)')
+    fitopt.add_argument('--trials', type=int, default=10, help='Maximum number of fitting trials at each component number (default=10)')
+    fitopt.add_argument('--badcol_cutoff', type=int, default=3, help='Inactivate column after it causes a bad solution X number of times (default=3)')
+    fitopt.add_argument('--writeintermediates', action='store_true', help='Write each BM solution to file with specified prefix. Will be saved as prefix-intermediate-[component]-[trial].bm')
+
+    fitopt.add_argument('--priorA', type=float, default=2, help='priorA value applied to all nucleotides. Default value is priorA=2 (a minimal naive prior). -1 will set priors based on background mutation rates in profile file.')
+    fitopt.add_argument('--priorB', type=float, default=2, help='priorB value applied to all nucleotides. Default value is priorB=2 (a minimal naive prior). -1 will set priors based on background mutation rates in profile file.')
+
+    ############################################################
+    # RING options
+    
+    ringopt = parser.add_argument_group('options for performing RING analysis on clustered reads')
+    ringopt.add_argument('--ring', action='store_true')
+    ringopt.add_argument('--untreated_parsed', help='Path to modified parsed.mut file')
+    ringopt.add_argument('--window', type=int, default=1, help='Window size for computing correlations (default=1)')
+
+
+
+
+    ############################################################
+    # Other options
+    
+    optional.add_argument('--readfromfile', type=str, help='Read in model from BM file')
+    optional.add_argument('--suppressverbal', action='store_false', help='Suppress verbal output')
+    optional.add_argument('--outputprefix', type=str, default='emfit', help='Write output files with this prefix (default=emfit)')
+    
+    parser._action_groups.append(optional)
 
     args = parser.parse_args()
+     
+    
+    ############################################################
+    # Check that required arguments were passed
+
+    if args.modified_parsed is None:
+        sys.stderr.write("\nmodified_parsed argument not provided\n\n")
+        sys.exit(1)
+        
+    if args.profile is None:
+        sys.stderr.write("\nprofile argument not provided\n\n")
+        sys.exit(1)
+     
+
+    ############################################################
+    # reformat arguments as necessary for downstream applications
+
+    if args.writeintermediates:
+        args.writeintermediates = args.outputprefix
+    else:
+        args.writeintermediates = None
+    
 
     return args
 
@@ -864,22 +961,38 @@ if __name__=='__main__':
     
     args = parseArguments()
     
-    EM = EnsembleMap(inpfile=args.inputFile, profilefile=args.profile, mincoverage=args.mincoverage,
-                     verbal=args.suppressVerbal)
+    EM = EnsembleMap(inpfile=args.modified_parsed, profilefile=args.profile, 
+                     mincoverage=args.mincoverage, verbal=args.suppressverbal)
+       
+    if args.fit:
+        
+        EM.findBestModel(args.maxcomponents, trials=args.trials,
+                         badcolcount = args.badcol_cutoff,
+                         verbal=args.suppressverbal,
+                         writeintermediate = args.writeintermediates)
+
+        EM.writeReactivities(args.outputprefix+'-reactivities.txt')
+        EM.BMsolution.writeModel(args.outputprefix+'.bm')
+
     
+    elif args.readfromfile is not None:
 
-    EM.findBestModel(args.maxcomponents, trials=args.trials,
-                     badcolcount = args.badcol_cutoff,
-                     verbal=args.suppressVerbal,
-                     writeintermediate = args.writeintermediates)
+        EM.readModelFromFile(args.readfromfile)
+
     
+    if args.ring:
+        
+        for c in range(EM.BMsolution.pdim):
 
-    EM.writeModelParams(args.outputFile)
-
-
-
-
-
+            ringexp = EM.computeRINGs(c, window=args.window, verbal=args.suppressverbal)
+        
+            if args.untreated_parsed is not None:
+                ringexp.initDataMatrices('bg', args.untreated_parsed, mincoverage=args.mincoverage,
+                                         window=args.window, verbal=args.suppressverbal)
+            
+            ringexp.computeCorrelationMatrix(verbal=args.suppressverbal)
+                                         
+            ringexp.writeCorrelations('{0}-{1}-rings.txt'.format(args.outputprefix, c))
 
 
 

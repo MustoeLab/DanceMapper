@@ -599,8 +599,86 @@ class BernoulliMixture(object):
                 self._writeModelParams(OUT)
 
 
+
+    def readModelFromFile(self, fname):
+        """Read in BM model from file"""
+            
+
+        with open(fname) as inp:
+            # pop off p header
+            inp.readline()
+            self.p = np.array(inp.readline().split(), dtype=float)
+            self.pdim = len(self.p)
+
+            # pop off mu header
+            inp.readline()
+            inp.readline()
+
+            actives = []
+            inactives = []
+            mu = []
+            idxmap = []
+            
+            i = -1
+            read = True
+            while read:
+                
+                i += 1
+                spl = inp.readline().split()
+                if len(spl) == 0 or spl[0][0]=='#':
+                    break
+
+                idxmap.append(int(spl[0]))
+                
+                vals = map(float, spl[1:1+self.pdim])
+                
+                if vals[0] != vals[0]:
+                    mu.append([-1]*self.pdim)
+
+                elif vals[0] == vals[0] and spl[-1] == 'i':
+                    inactives.append(i)
+                    mu.append(vals)
+                else:
+                    actives.append(i)
+                    mu.append(vals)
+
+
+            self.idxmap = np.array(idxmap)
+            self.active_columns = np.array(actives, dtype=np.int32)
+            self.inactive_columns = np.array(inactives, dtype=np.int32)
+
+            mu = np.array(mu)
+            self.mu = np.array(mu.transpose(), order='C')
+
+            self.mudim = self.mu.shape[1]
+            
+            inp.readline()
+            self.p_initial = np.array(inp.readline().split(), dtype=float)
+            
+            inp.readline()
+            inp.readline()
         
-    
+            self.mu_initial = -1*np.ones(self.mu.shape)
+            
+            i = -1
+            read = True
+
+            while read:
+                i += 1
+                spl = inp.readline().split()
+                if len(spl)==0 or spl[0][0]=='#':
+                    break
+
+                self.mu_initial[:, i] = map(float, spl[1:])
+
+            inp.readline()
+            self.priorA = np.array(inp.readline().split(), dtype=float)
+
+            inp.readline()
+            inp.readline()
+            self.priorB = np.array(inp.readline().split(), dtype=float)
+
+        
 
     def imputeInactiveParams(self, reads, mutations):
         """ Impute inactive Mu parameters using parameters of the base Bernoulli Mixture

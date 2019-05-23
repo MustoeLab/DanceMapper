@@ -10,11 +10,15 @@
 
 
 from distutils.core import setup
+from distutils.extension import Extension
 from Cython.Build import cythonize
 import numpy
 
+ext = Extension('accessoryFunctions', 
+                sources=['accessoryFunctions.pyx'], 
+                include_dirs = [numpy.get_include()])
+
 setup(
     name = "accessoryFunctions",
-    ext_modules = cythonize("accessoryFunctions.pyx"),
-    include_dirs = [numpy.get_include()]
+    ext_modules = cythonize(ext)
 )
