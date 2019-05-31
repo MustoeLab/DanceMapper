@@ -8,17 +8,21 @@
 #
 #########################################################
 
-
-from distutils.core import setup
-from distutils.extension import Extension
+from setuptools import setup, Extension
 from Cython.Build import cythonize
 import numpy
 
+
+# get path to functions needed for mutstring I/O
+import ringmapperpath
+
+
 ext = Extension('accessoryFunctions', 
-                sources=['accessoryFunctions.pyx'], 
-                include_dirs = [numpy.get_include()])
+                sources=['accessoryFunctions.pyx', 'dSFMT/dSFMT.c'], 
+                include_dirs = [numpy.get_include(), ringmapperpath.path()],
+                extra_compile_args=["-DDSFMT_MEXP=19937"]) # arg for dSFMT
 
 setup(
     name = "accessoryFunctions",
-    ext_modules = cythonize(ext)
+    ext_modules = cythonize(ext),
 )

@@ -1,14 +1,20 @@
 
 import numpy as np
-import itertools, argparse, warnings
-from collections import deque
-
-from ReactivityProfile import ReactivityProfile
-from BernoulliMixture import *
-
-from ringmapper import RINGexperiment
+import sys, argparse, warnings
 
 import accessoryFunctions
+from BernoulliMixture import *
+
+
+
+# get path to functions needed for mutstring I/O
+import ringmapperpath
+sys.path.append(ringmapperpath.path())
+
+from ReactivityProfile import ReactivityProfile
+from ringmapper import RINGexperiment
+from pairmapper import PairMapper
+
 
 
 class EnsembleMap(object):
@@ -45,6 +51,7 @@ class EnsembleMap(object):
         
         if profilefile is not None:
             self.profile = ReactivityProfile(profilefile)
+            self.profile.normalize(DMS=True)
             self.sequence = ''.join(self.profile.sequence)
             self.seqlen = len(self.sequence)
             self.ntindices = self.profile.nts
@@ -197,7 +204,7 @@ class EnsembleMap(object):
 
             # make sure they aren't conflicting
             if np.sum(np.isin(activecols, inactivecols))>0 and \
-                    np.sum(np.isin(activecols, inactivecols))>0:
+                    np.sum(np.isin(inactivecols, activecols))>0:
                 raise ValueError('activecols and inactivecols are conflicting')
             
             totc = len(activecols) + len(inactivecols) + len(self.invalid_columns)
@@ -259,24 +266,6 @@ class EnsembleMap(object):
             print("\tTotal inactive nts :: {}".format(self.ntindices[self.inactive_columns]))
 
     
-
-        
-    def MAPClassification(self):
-        """NOT WORKING"""
-        raise RuntimeError("Read classification not implemented")
-
-        W = self.computePosteriorProb(self.p, self.mu[:,self.active_mask])
-    
-        assignments = np.ones(self.numreads, dtype=np.int8)*-1
-    
-        for i in xrange(self.components):
-            mask = (np.max(W, axis=1) == W[:,i])
-            assignments[mask] = i
-    
-        assert np.sum(assignments<0) == 0
-
-        return assignments
-
 
     
     def compute1ComponentModel(self):
@@ -428,7 +417,13 @@ class EnsembleMap(object):
 
         if bestfitcount == soln_termcount and verbal:
             print('{0} identical fits found. Terminating trials'.format(bestfitcount))
+        
 
+        # reset the active/inactive cols if necessary
+        if bestfit is not None:
+            self.setColumns(activecols=bestfit.active_columns, 
+                            inactivecols=bestfit.inactive_columns)    
+        
 
         return bestfit, fitlist
         
@@ -503,7 +498,7 @@ class EnsembleMap(object):
 
             bestBM, fitlist = self.fitEM(c, trials=trials, badcolcount=badcolcount,
                                          verbal=verbal, writeintermediate=writeintermediate, **kwargs)
-            
+               
             # terminate if no valid solution found             
             if bestBM is None:
                 if verbal:
@@ -557,8 +552,13 @@ class EnsembleMap(object):
         for i,f in enumerate(fitlist):
 
             pdiff, mudiff = bestfit.modelDifference(f, func=np.max)
-                 
-            print("\tModel {0}  BIC={1:.1f}  Max_dP={2:.4f}  Max_dMu={3:.4f}".format(i+1, f.BIC, pdiff, mudiff))
+            
+            bmcode = ''
+            if f is bestfit:
+                bmcode='Best'
+
+            print("\tModel {0}  BIC={1:.1f}  Max_dP={2:.4f}  Max_dMu={3:.4f} {4}".format(i+1, f.BIC, pdiff, mudiff,bmcode))
+
 
         print('*'*65+'\n')
  
@@ -849,8 +849,6 @@ class EnsembleMap(object):
         
         weights = self.BMsolution.computePosteriorProb(self.reads, self.mutations)
         
-        b = weights[modelnum,:]
-        
         nsel = accessoryFunctions.fillRINGMatrix(read, comut, inotj, 
                                                  self.reads, self.mutations, 
                                                  weights[modelnum, :], maxreads, window) 
@@ -863,9 +861,59 @@ class EnsembleMap(object):
 
         return ring
 
+ 
+
+    def computeRINGs2(self, window=1, maxreads=-1, corrtype='apc', 
+                      bgfile=None, verbal=True, **bgfileargs):
+        """Sample reads stochastically and return RINGexperiment objects for each model"""
+        
+        # setup the activestatus mask
+        activestatus = np.zeros(self.seqlen, dtype=np.int8)
+        activestatus[self.active_columns] = 1
+        
+        pdim = self.BMsolution.pdim
+        
+        read  = np.zeros( (pdim, self.seqlen, self.seqlen), dtype=np.int32)
+        comut = np.zeros( (pdim, self.seqlen, self.seqlen), dtype=np.int32)
+        inotj = np.zeros( (pdim, self.seqlen, self.seqlen), dtype=np.int32)
+        
+        # fill in the matrices
+        accessoryFunctions.fillRINGMatrix2(read, comut, inotj, self.reads, self.mutations,
+                                           activestatus, self.BMsolution.mu, self.BMsolution.p, 
+                                           maxreads, window)
+
+        relist = [] 
+        
+        # populate RINGexperiment objects
+        for p in xrange(pdim):
+
+            ring = RINGexperiment(arraysize = self.seqlen,
+                                  corrtype = corrtype,
+                                  verbal = verbal)
+
+            ring.sequence = self.sequence
+
+            ring.window = window
+            ring.ex_readarr = read[p]
+            ring.ex_comutarr = comut[p]
+            ring.ex_inotjarr = inotj[p]
+        
+    
+            if bgfile is not None:
+                if p==0:
+                    ring.initDataMatrices('bg', bgfile, window=window, verbal=verbal, **bgfileargs)
+                else:
+                    ring.bg_readarr = relist[0].bg_readarr
+                    ring.bg_comutarr = relist[0].bg_comutarr
+                    ring.bg_inotjarr = relist[0].bg_inotjarr
 
 
+            relist.append(ring)
 
+        return relist
+
+
+    
 ####################################################################################
 
 
@@ -907,11 +955,12 @@ def parseArguments():
     # RING options
     
     ringopt = parser.add_argument_group('options for performing RING analysis on clustered reads')
+    ringopt.add_argument('--oldring', action='store_true')
     ringopt.add_argument('--ring', action='store_true')
     ringopt.add_argument('--untreated_parsed', help='Path to modified parsed.mut file')
     ringopt.add_argument('--window', type=int, default=1, help='Window size for computing correlations (default=1)')
 
-
+    ringopt.add_argument('--pairmap', action='store_true') 
 
 
     ############################################################
@@ -937,6 +986,11 @@ def parseArguments():
         sys.stderr.write("\nprofile argument not provided\n\n")
         sys.exit(1)
      
+    
+    if args.fit is None and args.ring is None and args.pairmap is None:
+        sys.stderr.write("\nprofile argument not provided\n\n")
+        sys.exit(1)
+    
 
     ############################################################
     # reformat arguments as necessary for downstream applications
@@ -946,6 +1000,7 @@ def parseArguments():
     else:
         args.writeintermediates = None
     
+
 
     return args
 
@@ -980,7 +1035,7 @@ if __name__=='__main__':
         EM.readModelFromFile(args.readfromfile)
 
     
-    if args.ring:
+    if args.oldring:
         
         for c in range(EM.BMsolution.pdim):
 
@@ -994,10 +1049,37 @@ if __name__=='__main__':
                                          
             ringexp.writeCorrelations('{0}-{1}-rings.txt'.format(args.outputprefix, c))
 
+    
+    if args.ring:
+
+        relist = EM.computeRINGs2(window=args.window, verbal=args.suppressverbal,
+                                  bgfile=args.untreated_parsed, mincoverage=args.mincoverage)
+
+        for i,model in enumerate(relist):
+            model.computeCorrelationMatrix(verbal=args.suppressverbal)
+            model.writeCorrelations('{0}-{1}-rings.txt'.format(args.outputprefix, i))
 
 
 
+    if args.pairmap:
+        
+        profiles = EM.computeNormalizedReactivities()
 
+        relist = EM.computeRINGs2(window=3, verbal=args.suppressverbal, 
+                                  bgfile=args.untreated_parsed, mincoverage=args.mincoverage)
+        
+
+        for i,model in enumerate(relist):
+            model.computeCorrelationMatrix(verbal=args.suppressverbal)
+
+            model.computeZscores()
+
+            pairs = PairMapper(model, profiles[i])
+            pairs.writePairs('{0}-{1}-pairmap.txt'.format(args.outputprefix, i))
+                   
+
+
+            
 
 
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4

@@ -1,11 +1,8 @@
 
-# branched from emtool3 to have new class structure
-
 
 import numpy as np
 import itertools, sys, copy
 from collections import deque
-import time
 import accessoryFunctions
 
 
@@ -404,12 +401,10 @@ class BernoulliMixture(object):
 
         CM = ConvergenceMonitor(self.active_columns, maxsteps=maxiterations, convergeThresh=convergeThresh)
         
-        totaltime = []
 
         while CM.iterate: 
             
             # expectation step
-            t = time.time()
             W = self.computePosteriorProb(reads, mutations)
             
             self.maximization(reads, mutations, W)
@@ -417,11 +412,7 @@ class BernoulliMixture(object):
             # this will throw ConvergenceErrors if bad soln
             CM.update(self.p, self.mu)
             
-            totaltime.append(time.time()-t)
-
         
-        #print 'Total mean={0:.1f} std={1:.1f}'.format(np.mean(totaltime), np.std(totaltime))
-
 
         self.converged = CM.converged
         self.cError = CM.error
@@ -529,9 +520,14 @@ class BernoulliMixture(object):
 
     def _writeModelParams(self, OUT):
         """Write out the params of the model to object OUT in a semi-human readable form"""
-        
+            
+        # sort model components by population
+        sortidx = range(self.pdim)
+        sortidx.sort(key=lambda x: self.p[x], reverse=True)
+
+
         OUT.write('# P\n')
-        np.savetxt(OUT, self.p, fmt='%.16f', newline=' ')
+        np.savetxt(OUT, self.p[sortidx], fmt='%.16f', newline=' ')
         
         OUT.write('\n\n# Mu\n')
         
@@ -547,7 +543,7 @@ class BernoulliMixture(object):
             if i not in self.inactive_columns and i not in self.active_columns:
                 OUT.write('nan '*self.pdim)
             else:
-                np.savetxt(OUT, self.mu[:,i], fmt='%.16f', newline=' ')
+                np.savetxt(OUT, self.mu[sortidx,i], fmt='%.16f', newline=' ')
                 
                 if i in self.inactive_columns:
                     OUT.write('i')
@@ -556,7 +552,7 @@ class BernoulliMixture(object):
     
         
         OUT.write('\n# Initial P\n')
-        np.savetxt(OUT, self.p_initial, fmt='%.16f', newline=' ')
+        np.savetxt(OUT, self.p_initial[sortidx], fmt='%.16f', newline=' ')
         
         # write out full initial mu without worrying about active/inactive
         OUT.write('\n\n# Initial Mu\n')
@@ -566,7 +562,7 @@ class BernoulliMixture(object):
             else:
                 OUT.write('{0} '.format(i))
 
-            np.savetxt(OUT, self.mu_initial[:,i], fmt='%.16f', newline=' ')
+            np.savetxt(OUT, self.mu_initial[sortidx,i], fmt='%.16f', newline=' ')
             OUT.write('\n')
     
 
@@ -633,7 +629,7 @@ class BernoulliMixture(object):
                 vals = map(float, spl[1:1+self.pdim])
                 
                 if vals[0] != vals[0]:
-                    mu.append([-1]*self.pdim)
+                    mu.append([-999]*self.pdim)
 
                 elif vals[0] == vals[0] and spl[-1] == 'i':
                     inactives.append(i)
