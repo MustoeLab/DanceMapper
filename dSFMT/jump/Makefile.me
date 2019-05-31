@@ -1,0 +1,82 @@
+# -*- makefile -*-
+#for GNU make
+
+#DDEBUG = -O0 -g -DDEBUG=1
+CPPOPT = -D__STDC_CONSTANT_MACROS=1 -D__STDC_FORMAT_MACROS=1
+CCOPT = -std=c99 -Wall -Wmissing-prototypes
+CC = gcc -O9 -I../ $(DDEBUG) $(DMEXP) $(DPG)
+CPP = g++ -Wall -O9 -I../ $(DDEBUG) $(DMEXP) $(DPG)
+OMP = -fopenmp
+
+LINKOPT = -lntl -lgf2x
+
+FILES = FILES.txt \
+	CHANGE-LOG.txt \
+	LICENSE.txt \
+	Makefile \
+	readme.html \
+	readme-jp.html \
+        dSFMT-jump.h \
+	dSFMT-jump.c \
+	dSFMT-calc-jump.hpp \
+	calc-jump.cpp \
+	test-jump.cpp \
+	check-jump.sh \
+	sample1.c \
+	sample2.c \
+	poly.521.txt \
+	poly.1279.txt \
+	poly.2203.txt \
+	poly.4253.txt \
+	poly.11213.txt \
+	poly.19937.txt \
+	poly.44497.txt \
+	poly.86243.txt \
+	poly.132049.txt \
+	poly.216091.txt \
+	html
+
+VERSION = 0.1
+DIR = dSFMTJump-src-${VERSION}
+
+doc:
+	rm -rf html
+	doxygen doxygen.cfg
+
+.PHONY : tar.gz
+tar.gz: $(FILES)
+	mkdir ${DIR}
+	mkdir ${DIR}/jump
+	cp -r ${FILES} ${DIR}/jump
+	tar czvf ${DIR}.tar.gz ${DIR}/*
+	rm -rf ${DIR}
+
+.PHONY : zip
+zip: $(FILES)
+	mkdir ${DIR}
+	mkdir ${DIR}/jump
+	cp -r ${FILES} ${DIR}/jump
+	zip -r ${DIR}.zip ${DIR}/*
+	rm -rf ${DIR}
+
+calc-characteristic: calc-characteristic.cpp dSFMText.hpp
+	${CPP} ${CPPOPT} -o $@ calc-characteristic.cpp ${LINKOPT}
+
+calc-characteristic-mpi: calc-characteristic-mpi.cpp dSFMText.hpp
+	${CPP} ${CPPOPT} ${OMP} -o $@ calc-characteristic-mpi.cpp ${LINKOPT}
+
+factorization:factorization.cpp
+	${CPP} ${CPPOPT} -o $@ factorization.cpp ${LINKOPT}
+
+degree:degree.cpp
+	${CPP} ${CPPOPT} -o $@ degree.cpp ${LINKOPT}
+
+
+.cpp.o:
+	${CPP} -c $<
+
+.c.o:
+	${CC} -c $<
+
+clean:
+	rm -rf *.o *~ *.dSYM
