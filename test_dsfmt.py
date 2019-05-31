@@ -2,9 +2,9 @@
 import numpy as np
 
 try:
-    import test
+    import test_dsfmt
 
-    comparison = np.array(test.test(1000))
+    comparison = np.array(test_dsfmt.test(1000))
 
     reference = []
     with open('dSFMT/dSFMT.19937.out.txt') as inp:

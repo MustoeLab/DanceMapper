@@ -1,6 +1,4 @@
 
-import test
-
 #from dSFMT.dSFMT cimport dsfmt_t, dsfmt_init_gen_rand, dsfmt_genrand_close_open
 from dSFMT cimport dsfmt_t, dsfmt_init_gen_rand, dsfmt_genrand_close_open
 
