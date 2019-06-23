@@ -710,7 +710,7 @@ class BernoulliMixture(object):
         # if they shift too much, there is a problem...
         pdiff = np.max(np.abs(self.p - originalp))
         if pdiff > 0.01:
-            raise ConvergenceError('Large P shift during inactive column imputation = {0}'.format(popdiff),'term')
+            raise ConvergenceError('Large P shift during inactive column imputation = {0}'.format(pdiff),'term')
 
         
 

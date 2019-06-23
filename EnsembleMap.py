@@ -1070,13 +1070,13 @@ if __name__=='__main__':
         
 
         for i,model in enumerate(relist):
-            model.computeCorrelationMatrix(verbal=args.suppressverbal)
+            model.computeCorrelationMatrix(verbal=args.suppressverbal, corrbuffer=6)
 
-            model.computeZscores()
+            #model.computeZscores()
 
             pairs = PairMapper(model, profiles[i])
             pairs.writePairs('{0}-{1}-pairmap.txt'.format(args.outputprefix, i))
-                   
+            pairs.writePairBonusFile('{0}-{1}-pairmap.bp'.format(args.outputprefix,i), 20, fileformat=1)      
 
 
             
