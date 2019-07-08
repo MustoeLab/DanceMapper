@@ -105,7 +105,73 @@ cdef int fillReadMutArrays(np.int8_t[:] readstr, np.int8_t[:] mutstr, READ r):
         coverage += r.read[i]-r.subcode
             
     return coverage
+
+
+
+
+##################################################################################
+
+def compute1Dprofile(str inputFile, int seqlen, int mincoverage):
+    """Compute the 1D read depth and mutation rate from the provided mutation string file"""
     
+    # mem alloc for reading the file using c
+    cdef FILE* cfile
+    cdef size_t lsize = 0
+    cdef ssize_t endfile
+    cdef char* line = NULL
+    
+    # mem alloc for read parsing and for loops   
+    cdef READ r
+    cdef int i, idx, coverage
+    
+    cdef double[:] mutationrate = np.zeros(seqlen, dtype=np.float64) 
+    cdef int[:] readdepth = np.zeros(seqlen, dtype=np.int32) 
+ 
+
+    # open the file
+    cfile = fopen(inputFile, "r")
+    if cfile == NULL:
+        raise IOError(2, "No such file or directory: '{0}'".format(inputFile))
+
+    cdef int linenum = -1
+    
+    # iterate through lines
+    while True and linenum<1e12:
+        
+        linenum += 1 
+        
+        # get the line of text using c-function
+        endfile = getline(&line, &lsize, cfile)
+        if endfile == -1:
+            break
+        
+        r = parseLine(line, 3)
+        if r.read == NULL:
+            continue
+        elif r.stop >= seqlen:
+            print("Skipping line {0} with out-of-array-bounds = ({1}, {2})".format(linenum, r.start, r.stop))
+            continue
+            
+        coverage = 0
+        for i in xrange(r.stop - r.start + 1):
+            coverage += r.read[i]-r.subcode
+            
+        if coverage >= mincoverage:
+            for i in xrange(r.stop - r.start + 1):
+                idx = i+r.start       
+                readdepth[idx] += r.read[i]-r.subcode
+                mutationrate[idx] += r.muts[i]-r.subcode
+
+    fclose(cfile)
+
+    
+    for i in xrange(seqlen):
+        if readdepth[i] > 0:
+            mutationrate[i] /= readdepth[i]
+
+    return np.array(mutationrate), np.array(readdepth)
+
+
 
 
 ##################################################################################
@@ -153,38 +219,42 @@ def loglikelihoodmatrix(double[:,::1] loglike, char[:,::1] reads, char[:,::1] mu
 
 ##################################################################################
 
-
-
-def maximization(double[:] p, double[:,::1] mu, double[:,::1] readWeights, 
-        char[:,::1] reads, char[:,::1] mutations, int[:] activecols,
-        double[:] priorA, double[:] priorB):
-    """Update p and mu parameters based on readWeights
+def maximizeP(double[:] p, double[:,::1] readWeights):
+    """Update p parameters based on readWeights
     The 'maximization' step of the EM algorithm"""
-    
-    cdef int modeldim = p.shape[0]
-    cdef int numreads = reads.shape[0]
-    cdef int actlen = activecols.shape[0]
-    cdef int d, i, j, col
-    
-    # update p params
+ 
+    cdef int d, i
     cdef double modelweight
+    cdef int numreads = readWeights.shape[1]
     
-    for d in xrange(modeldim):
+    for d in xrange(p.shape[0]):
 
-        modelweight = 0
+        modelweight = 0.0
         for i in xrange(numreads):
             modelweight += readWeights[d,i]
         
+        #p[d] = (modelweight + pPrior[d] -1) / (numreads + sumpPrior - modeldim)
         p[d] = modelweight/numreads
-    
 
-    # update mu params 
+
+
+
+def maximizeMu(double[:,::1] mu, double[:,::1] readWeights, 
+               char[:,::1] reads, char[:,::1] mutations, int[:] activecols,
+               double[:,::1] priorA, double[:,::1] priorB):
+    """Update mu parameters based on readWeights
+    The 'maximization' step of the EM algorithm"""
+    
+    cdef int modeldim = mu.shape[0]
+    cdef int numreads = reads.shape[0]
+    cdef int actlen = activecols.shape[0]
+    cdef int d, i, j, col
     
     #reset mu and add prior to the numerator
     for d in xrange(modeldim):
         for j in xrange(actlen):
             col = activecols[j]
-            mu[d,col] = priorA[col]-1
+            mu[d,col] = priorA[d,col]-1
 
     # initialize denominator with priors
     cdef double[:,::1] positionweight = np.zeros((modeldim, actlen))
@@ -192,7 +262,7 @@ def maximization(double[:] p, double[:,::1] mu, double[:,::1] readWeights,
     for d in xrange(modeldim):
         for j in xrange(actlen):
             col = activecols[j]
-            positionweight[d,j] = priorA[col]+priorB[col]-2
+            positionweight[d,j] = priorA[d,col]+priorB[d,col]-2
     
     # accumulate numerator and denominator
     for d in xrange(modeldim):
@@ -322,7 +392,6 @@ def fillRINGMatrix2(int[:,:,::1] read_arr, int[:,:,::1] comut_arr, int[:,:,::1] 
         # compute overall loglike of the read
         readloglike(loglike, activestatus, reads[n,:], mutations[n,:], logp, logmu, clogmu)
         
-        _loglike2prob(loglike, weights)
         
         # now iterate through all i/j pairs
         for i in xrange(read_arr.shape[1]-window+1):

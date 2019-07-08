@@ -19,7 +19,7 @@ from pairmapper import PairMapper
 
 class EnsembleMap(object):
 
-    def __init__(self, inpfile=None, profilefile=None, **kwargs):
+    def __init__(self, modfile=None, untfile=None, profilefile=None, **kwargs):
         """Define important global parameters"""
     
         # reads contains positions that are 'read'
@@ -44,47 +44,71 @@ class EnsembleMap(object):
         self.ntindices = None
         self.sequence = None
         self.numreads = None
+        self.minreadcoverage = None
         
-
         # contains final BMsolution, if fitting done
         self.BMsolution = None
         
-        if profilefile is not None:
-            self.profile = ReactivityProfile(profilefile)
-            self.profile.normalize(DMS=True)
-            self.sequence = ''.join(self.profile.sequence)
-            self.seqlen = len(self.sequence)
-            self.ntindices = self.profile.nts
         
+        if profilefile is not None:
+            self.init_profile(profilefile)
 
         elif seqlen is not None:
             self.seqlen = seqlen
-            self.ntindices = np.arange(seqlen)
+            self.ntindices = np.arange(1, seqlen+1, dtype=np.int32)
 
-        if inpfile is not None:
-            self.readData(inpfile, **kwargs)
+        
+        # first initialize reads/mutations, which will set mincoverage
+        if modfile is not None:
+            self.readPrimaryData(modfile, **kwargs)
+        
+        # if provide, now update profile.backprofile with rate computed 
+        # using reads filtered according to same criterai for primary data
+        if untfile is not None:
+            self.computeBGprofile(untfile, **kwargs)
 
+        
+        if self.reads is not None:
+            self.initializeActiveCols(**kwargs)
+
+
+    def init_profile(self, profilefile):
+
+        self.profile = ReactivityProfile(profilefile)
+        self.profile.normalize(DMS=True)
+        self.sequence = ''.join(self.profile.sequence)
+        self.seqlen = len(self.sequence)
+        self.ntindices = self.profile.nts
+        
     
 
-    def readData(self, fname, mincoverage=None, **kwargs):
-        
+
+    def readPrimaryData(self, modfilename, minreadcoverage=None, **kwargs):
         
         # Determine mincoverage quality filter
-        if mincoverage is None:
+        if minreadcoverage is None and self.minreadcoverage is None:
             
-            mincoverage = self.seqlen
+            minreadcoverage = self.seqlen
             
             # if profile is defined, remove nan positions from calculation
             if self.profile is not None:
-                mincoverage -= np.sum(np.isnan(self.profile.normprofile))
+                minreadcoverage -= np.sum(np.isnan(self.profile.normprofile))
 
-            mincoverage = int(round(mincoverage*0.95))
-            print('No mincoverage specified. Using default 95% coverage = {} nts'.format(mincoverage))
+            self.minreadcoverage = int(round(minreadcoverage*0.75))
+            
+            print('No mincoverage specified. Using default 75% coverage = {} nts'.format(self.minreadcoverage))
+        
 
+        elif minreadcoverage is not None and self.minreadcoverage is None:
+            self.minreadcoverage = minreadcoverage
+
+        elif minreadcoverage is not None and minreadcoverage != self.minreadcoverage:
+            print('WARNING: resetting self.minreadcoverage to passed value {}'.format(minreadcoverage))
+            self.minreadcoverage = minreadcoverage
 
 
         # read in the matrices
-        reads, mutations = accessoryFunctions.fillReadMatrices(fname, self.seqlen, mincoverage)
+        reads, mutations = accessoryFunctions.fillReadMatrices(modfilename, self.seqlen, self.minreadcoverage)
         
         print('{} reads for clustering\n'.format(reads.shape[0]))
 
@@ -93,12 +117,32 @@ class EnsembleMap(object):
         
         self.numreads = self.reads.shape[0]
         
-        self.initializeActiveCols(**kwargs)
+ 
+
+
+    def computeBGprofile(self, untfilename, verbal=True, **kwargs):
+        """compute BG profile from raw mutation file"""
+            
+        if self.minreadcoverage is None:
+            raise AttributeError('minreadcoverage not set!')
+
+
+        bgrate, bgdepth = accessoryFunctions.compute1Dprofile(untfilename, self.seqlen, self.minreadcoverage)
+        
+
+        if self.profile is None:
+            self.profile = ReactivityProfile()
+        elif verbal:
+            print('Overwriting bgrate from values computed from the raw mutation file {}'.format(untfilename))
+
+
+        self.profile.backprofile = bgrate
+        self.profile.normalize(DMS=True)
 
  
 
 
-    def initializeActiveCols(self, invalidcols=[], minrx=0.002, maxbg=0.01, minrxbg=0.002, verbal = True, **kwargs):
+    def initializeActiveCols(self, invalidcols=[], invalidrate=0.0001, maxbg=0.02, minrxbg=0.002, verbal = True, **kwargs):
         """Apply quality filters to eliminate noisy nts from EM fitting
         invalidcols = list of columns to set to invalid
         minrx       = minimum signal (react. rate)
@@ -113,7 +157,7 @@ class EnsembleMap(object):
         # initialize invalid positions
         ###################################
 
-        if verbal:
+        if verbal and len(invalidcols)>0:
             print("Nts {} set invalid by user".format(self.ntindices[invalidcols]))
 
 
@@ -125,41 +169,50 @@ class EnsembleMap(object):
                     invalidcols.append(i)
                     profilenan.append(i)
         
-        if verbal:
+        if verbal and len(profilenan)>0:
             print("Nts {} invalid due to masking in profile file".format(self.ntindices[profilenan]))
 
 
-        # Double check data that we actually clustering to exclude very low rates
+        # Check data to exclude very low rates
         signal = np.sum(self.mutations, axis=0, dtype=np.float)
         
         lowsignal = []         
-        for i in np.where(signal < 0.0001*self.mutations.shape[0])[0]:
+        for i in np.where(signal < invalidrate*self.mutations.shape[0])[0]:
             if i not in invalidcols:
                 lowsignal.append(i)
                 invalidcols.append(i)
 
-        if verbal:
-            print("Nts {} set to invalid due to low mutation signal".format(self.ntindices[lowsignal]))
+        if verbal and len(lowsignal)>0:
+            print("Nts {} set to invalid due to low mutation rate".format(self.ntindices[lowsignal]))
         
-    
+        
+        highbg = []
+        if self.profile is not None:
+            for i, val in enumerate(self.profile.backprofile):
+                if val > maxbg and i not in invalidcols:
+                    invalidcols.append(i)
+                    highbg.append(i)
+        
+        if verbal and len(highbg)>0:
+            print("Nts {} set to invalid due to high untreated rate".format(self.ntindices[highbg]))
+        
+        
         invalidcols.sort()
         self.invalid_columns = np.array(invalidcols)
+        
+        if verbal:
+            print("Total invalid nts: {}".format(self.ntindices[invalidcols]))
 
         
         ###################################
         # initialize inactive positions
         ###################################
         
-        if 0: #self.profile is not None:
+        if self.profile is not None:
 
             with np.errstate(divide='ignore',invalid='ignore'):
-                mod = self.profile.rawprofile
-                unt = self.profile.backprofile
-                diff = mod-unt
-                
-                inactive = (mod < minrx)
-                inactive = inactive | (unt > maxbg)
-                inactive = inactive | (diff < minrxbg)
+                diff = self.profile.rawprofile - self.profile.backprofile
+                inactive = (diff < minrxbg)
             
             # invalid columns are distinct from inactive
             inactive[self.invalid_columns] = False
@@ -170,8 +223,8 @@ class EnsembleMap(object):
 
         self.inactive_columns = np.where(inactive)[0]
             
-        if verbal:
-            print("Nts {} set to inactive due to low mutation signal".format(self.ntindices[self.inactive_columns]))
+        if verbal and len(self.inactive_columns)>0:
+            print("Nts {} set to inactive due to low modification rate".format(self.ntindices[self.inactive_columns]))
 
         
         ###################################
@@ -304,8 +357,8 @@ class EnsembleMap(object):
 
 
 
-    def fitEM(self, components, trials=5, soln_termcount=3, badcolcount=2, verbal=False, 
-            writeintermediate=None, **kwargs):
+    def fitEM(self, components, trials=5, soln_termcount=3, badcolcount=2, priorWeight=-1,
+              verbal=False, writeintermediate=None, **kwargs):
         """Fit Bernoulli Mixture model of a specified number of components.
         Trys a number of random starting conditions. Terminates after finding a 
         repeated valid solution, a repeated set of 'invalid' column solutions, 
@@ -315,6 +368,8 @@ class EnsembleMap(object):
         trials = max number of fitting trials to run
         soln_termcount = terminate after this many identical solutions founds
         badcolcount = set columns inactive after this many times of causing BM failure
+        
+        priorWeight = weight of dynamic prior used during fitting. If -1, disable
 
         writeintermediate = write out each BM soln to specified prefix
         verbal = T/F on whether to print results of each trial
@@ -329,7 +384,12 @@ class EnsembleMap(object):
         
         # array for each col; incremented each time a col causes failure of BM soln
         badcolumns = np.zeros(self.seqlen, dtype=np.int32)
-                
+         
+        
+        if self.active_columns is None:
+            print('active_columns not set... initializing')
+            self.initializeActiveCols(verbal=True)
+
         
         # don't need to fit for c=1
         if components == 1:
@@ -360,6 +420,10 @@ class EnsembleMap(object):
                                   inactive_columns=self.inactive_columns, 
                                   idxmap=self.ntindices)
             
+            # set up the prior
+            if priorWeight > 0:
+                BM.setDynamicPriors(priorWeight, self.profile.backprofile)
+
             # fit the BM
             BM.fitEM(self.reads, self.mutations, verbal=verbal, **kwargs)
  
@@ -462,18 +526,20 @@ class EnsembleMap(object):
 
     
     
-    def findBestModel(self, maxcomponents=5, trials=5, dynamic_inactive_cutoff = 0.1, 
-                            badcolcount=2, verbal=False, writeintermediate=None, **kwargs):
+    def findBestModel(self, maxcomponents=5, verbal=False, writeintermediate=None, **kwargs):
         """Fit BM model for progessively increasing number of model components 
         until model with best BIC is found. 
         Dynamically updates inactive list as problematic columns are identified
 
         maxcomponents           = maximum number of components to attempt fitting
-        dynamic_inactive_cutoff = max fraction of nts allowed to dynamically set to inactive
-        invalidtermcount        = number of times an invalid column must recur to terminate,
-                                  and correspondingly set to inactive
+        trials = 
 
         **kwargs passed onto fitEM method"""
+
+
+        if self.active_columns is None:
+            print('active_columns not set... initializing')
+            self.initializeActiveCols(verbal=True)
 
 
         # best BernoulliMixture solution. Assign as 1-component solution to start
@@ -496,9 +562,9 @@ class EnsembleMap(object):
             if verbal: print('\nAdvancing to {}-component model\n'.format(c))
 
 
-            bestBM, fitlist = self.fitEM(c, trials=trials, badcolcount=badcolcount,
-                                         verbal=verbal, writeintermediate=writeintermediate, **kwargs)
-               
+            bestBM, fitlist = self.fitEM(c, verbal=verbal, writeintermediate=writeintermediate, **kwargs)
+             
+
             # terminate if no valid solution found             
             if bestBM is None:
                 if verbal:
@@ -663,7 +729,6 @@ class EnsembleMap(object):
 
     def bootstrap(self, n=100, randinit = False, verbal=False):
         """
-        REWRITE
         
         get it to return subsample from RINGexperiment
         have bootstrap calculations run in a different method
@@ -948,8 +1013,8 @@ def parseArguments():
     fitopt.add_argument('--badcol_cutoff', type=int, default=3, help='Inactivate column after it causes a bad solution X number of times (default=3)')
     fitopt.add_argument('--writeintermediates', action='store_true', help='Write each BM solution to file with specified prefix. Will be saved as prefix-intermediate-[component]-[trial].bm')
 
-    fitopt.add_argument('--priorA', type=float, default=2, help='priorA value applied to all nucleotides. Default value is priorA=2 (a minimal naive prior). -1 will set priors based on background mutation rates in profile file.')
-    fitopt.add_argument('--priorB', type=float, default=2, help='priorB value applied to all nucleotides. Default value is priorB=2 (a minimal naive prior). -1 will set priors based on background mutation rates in profile file.')
+    fitopt.add_argument('--priorWeight', type=float, default=0.01, help='Relative weight of dynamic prior on Mu (default=0.1). Dynamic prior method is disabled by passing -1, upon which a static naive prior is used. Valid weights are <0 and <1. Default = 0.01 (dynamic method enabled).')
+
 
     ############################################################
     # RING options
@@ -987,10 +1052,14 @@ def parseArguments():
         sys.exit(1)
      
     
-    if args.fit is None and args.ring is None and args.pairmap is None:
-        sys.stderr.write("\nprofile argument not provided\n\n")
+    if not args.fit and not args.ring and not args.pairmap:
+        sys.stderr.write("\n Action argument [fit, ring, pairmap] not provided\n\n")
         sys.exit(1)
     
+
+    if not 0<args.priorWeight<=1 and args.priorWeight != -1:
+        sys.stderr.write('\npriorWeight value = {} is invalid!\n\n'.format(args.priorWeight))
+        sys.exit(1)
 
     ############################################################
     # reformat arguments as necessary for downstream applications
@@ -1016,13 +1085,15 @@ if __name__=='__main__':
     
     args = parseArguments()
     
-    EM = EnsembleMap(inpfile=args.modified_parsed, profilefile=args.profile, 
-                     mincoverage=args.mincoverage, verbal=args.suppressverbal)
+    EM = EnsembleMap(modfile=args.modified_parsed, untfile=args.untreated_parsed,
+                     profilefile=args.profile, 
+                     minreadcoverage=args.mincoverage, verbal=args.suppressverbal)
        
     if args.fit:
         
         EM.findBestModel(args.maxcomponents, trials=args.trials,
                          badcolcount = args.badcol_cutoff,
+                         priorWeight = args.priorWeight,
                          verbal=args.suppressverbal,
                          writeintermediate = args.writeintermediates)
 

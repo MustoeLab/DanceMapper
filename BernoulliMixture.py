@@ -196,10 +196,9 @@ class BernoulliMixture(object):
     def __init__(self, pdim = None, mudim = None, p_initial=None, mu_initial=None,
                  active_columns = None, inactive_columns = None, idxmap = None,
                  priorA=2, priorB=2, **kwargs):
-        # 10, 10000
         """Flexibly initialize BM object
         pdim             = dimension of the p vector -- i.e. number of model components
-        mudim            = dimension of the mu vector -- i.e. number of data columns to fit
+        mudim            = dimension of the mu vector -- i.e. number of data columns
         p_initial        = initial p parameters  (pdim array)
         mu_initial       = initial mu parameters (mudim x pdim array)
         active_columns   = list of columns to cluster
@@ -231,8 +230,10 @@ class BernoulliMixture(object):
         if self.mudim is not None and self.mu_initial is None:
             self.initMu(**kwargs)
         
-
-        self.setPriors(priorA, priorB)
+        if self.pdim is not None and self.mudim is not None:
+            self.setConstantPriors(priorA, priorB)
+        
+        self.dynamicprior = False
 
         self.p = None
         self.mu = None
@@ -257,7 +258,6 @@ class BernoulliMixture(object):
 
     def copy(self):
         """return deep copy of BM"""
-        
         return copy.deepcopy(self)
 
 
@@ -318,26 +318,30 @@ class BernoulliMixture(object):
         self.converged = False
 
     
-    def setPriors(self, priorA, priorB):
+
+    def setConstantPriors(self, priorA, priorB):
         """set the beta priors
         priorA and priorB can be int or arraylike. If arraylike, must be 1D mudim array
         """
         
         if not isinstance(priorA, (float, int)):
             priorA = np.asarray(priorA)
-            if priorA.size != self.mudim:
+            if priorA.shape[-1] != self.mudim:
                 raise IndexError("priorA size = {0} is not equal to mudim = {1}".format(priorA.size, self.mudim))
-        
+            if len(priorA.shape) == 1:
+                priorA = priorA*np.ones((self.pdim, self.mudim))
+
         else:
-            priorA = priorA*np.ones(self.mudim)
+            priorA = priorA*np.ones((self.pdim, self.mudim))
 
         if not isinstance(priorB, (float, int)):
             priorB = np.asarray(priorB)
-            if priorB.size != self.mudim:
+            if priorB.shape[-1] != self.mudim:
                 raise IndexError("priorB size = {0} is not equal to mudim = {1}".format(priorB.size, self.mudim))
-        
+            if len(priorB.shape) == 1:
+                priorB = priorB*np.ones((self.pdim, self.mudim))
         else:
-            priorB = priorB*np.ones(self.mudim)
+            priorB = priorB*np.ones((self.pdim, self.mudim))
 
 
         self.priorA = priorA
@@ -346,26 +350,56 @@ class BernoulliMixture(object):
 
     
 
+    def setDynamicPriors(self, weight, baserate):
+
+        if not 0<weight<=1:
+            raise ValueError('DynamicPrior weight = {} is invalid, must be 0< <=1'.format(weight))
+
+        self.dynamic_weight = weight
+        self.dynamic_baserate = baserate
+
+        self.dynamicprior = True
+        
+
+
+
     def computePosteriorProb(self, reads, mutations):
         
+        # init the weight matrix
         W = np.zeros((self.pdim, reads.shape[0]), dtype=np.float64)
 
+        # fill the weight matrix with loglikelihood of each component
         accessoryFunctions.loglikelihoodmatrix(W, reads, mutations, self.active_columns, self.mu, self.p)
         
+        # covert to probability space
         W = np.exp(W)
-
+        
+        # convert to posterior prob
         W /= W.sum(axis=0)
 
         return W
  
 
 
-    def maximization(self, reads, mutations, W):
+    def maximization(self, reads, mutations, W, verbal=False):
         
-        accessoryFunctions.maximization(self.p, self.mu, W, reads, mutations, self.active_columns, self.priorA, self.priorB)
+        accessoryFunctions.maximizeP(self.p, W)
         
+        if self.dynamicprior:
+            self.updateDynamicPrior( reads.shape[0], verbal=verbal )
 
-
+        accessoryFunctions.maximizeMu(self.mu, W, reads, mutations, 
+                                      self.active_columns, self.priorA, self.priorB)
+        
+    
+    
+    def updateDynamicPrior(self, numreads, verbal=False):
+    
+        totalweight = self.dynamic_weight*numreads*self.p.reshape((-1,1))
+        self.priorA = totalweight*self.dynamic_baserate
+        self.priorB = totalweight*(1-self.dynamic_baserate)
+        
+        
 
     def fitEM(self, reads, mutations, maxiterations = 1000, convergeThresh=1e-4, verbal=False, **kwargs):
         """Fit model to data using EM 
@@ -424,11 +458,11 @@ class BernoulliMixture(object):
         # print outcome
         if verbal:
             if CM.converged:
-                print 'EM converged in {0} steps'.format(CM.step)
+                print 'EM converged in {0} steps, BIC={1:.1f}'.format(CM.step, self.BIC)
             else:
                 print self.cError.__str__(self.idxmap)
-
-    
+            
+            
     
     
     def computeModelLikelihood(self, reads, mutations):
@@ -446,12 +480,12 @@ class BernoulliMixture(object):
         
         # determine the likelihood of each read by summing over components
         readl = np.sum(np.exp(llmat), axis=0) 
-
+    
         # total log-likelihood --> the product of individual read likelihoods
         self.loglike = np.sum( np.log( readl ) )
 
         # number of parameters
-        npar = self.mudim*self.pdim + self.pdim-1
+        npar = len(self.active_columns)*self.pdim + self.pdim-1
         
         # BIC = -2*ln(LL) + npar*ln(n)
         self.BIC = -2*self.loglike + npar*np.log(reads.shape[0])
@@ -685,7 +719,7 @@ class BernoulliMixture(object):
             return
 
 
-        originalp = np.copy(self.p)
+        newp = np.copy(self.p)
         
         combined_columns = np.append(self.active_columns, self.inactive_columns)
 
@@ -701,14 +735,14 @@ class BernoulliMixture(object):
                 W = np.exp(W)
                 W /= W.sum(axis=0)
 
-
-            accessoryFunctions.maximization(self.p, self.mu, W, reads, mutations, self.inactive_columns, self.priorA, self.priorB)
+            accessoryFunctions.maximizeP(newp, W) 
+            accessoryFunctions.maximizeMu(self.mu, W, reads, mutations, self.inactive_columns, self.priorA, self.priorB)
         
 
 
         # look at whether the populations are shifting;
         # if they shift too much, there is a problem...
-        pdiff = np.max(np.abs(self.p - originalp))
+        pdiff = np.max(np.abs(newp - self.p))
         if pdiff > 0.01:
             raise ConvergenceError('Large P shift during inactive column imputation = {0}'.format(pdiff),'term')
 
