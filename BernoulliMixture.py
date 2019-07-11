@@ -1,7 +1,7 @@
 
 
 import numpy as np
-import itertools, sys, copy
+import itertools, sys, copy, time
 from collections import deque
 import accessoryFunctions
 
@@ -237,6 +237,8 @@ class BernoulliMixture(object):
 
         self.p = None
         self.mu = None
+        self.p_err = None
+        self.mu_err = None
         self.converged = False
         
         self.cError = None
@@ -313,8 +315,10 @@ class BernoulliMixture(object):
         if self.mudim is None:
             raise AttributeError("mudim is not defined")
 
-        mu = np.random.random((self.pdim, self.mudim))
-        self.mu_initial = mu*(mu_upb-mu_lowb) + mu_lowb
+        #mu = np.random.random((self.pdim, self.mudim))
+        #self.mu_initial = mu*(mu_upb-mu_lowb) + mu_lowb
+        
+        self.mu_initial = np.random.beta(1,40, (self.pdim, self.mudim))+0.001
         self.converged = False
 
     
@@ -435,6 +439,7 @@ class BernoulliMixture(object):
 
         CM = ConvergenceMonitor(self.active_columns, maxsteps=maxiterations, convergeThresh=convergeThresh)
         
+        timestart = time.time()
 
         while CM.iterate: 
             
@@ -447,20 +452,31 @@ class BernoulliMixture(object):
             CM.update(self.p, self.mu)
             
         
-
         self.converged = CM.converged
         self.cError = CM.error
-    
+        
+        t1 = time.time()
+        # make sure information matrix is defined
+        if self.converged:
+            try:
+                self.computeUncertainty(reads, mutations, W)
+            except ConvergenceError as e:
+                self.converged = False
+                self.cError = e
+
+        print '***',time.time()-t1
+
+
         # compute loglike and BIC        
         if self.converged:
             self.computeModelLikelihood(reads, mutations)
 
         # print outcome
         if verbal:
-            if CM.converged:
-                print 'EM converged in {0} steps, BIC={1:.1f}'.format(CM.step, self.BIC)
+            if self.converged:
+                print('EM converged in {0} steps ({1:.0f} seconds); BIC={2:.1f}'.format(CM.step, time.time()-timestart, self.BIC))
             else:
-                print self.cError.__str__(self.idxmap)
+                print(self.cError.__str__(self.idxmap))
             
             
     
@@ -491,6 +507,59 @@ class BernoulliMixture(object):
         self.BIC = -2*self.loglike + npar*np.log(reads.shape[0])
 
         return self.loglike, self.BIC
+
+   
+
+
+    def computeUncertainty(self, reads, mutations, readWeights=None):
+        """Compute the uncertainty of the model parameters from the information matrix
+        
+        NOTE: will raise ConvergenceError exception if information matrix is poorly defined
+        """
+       
+        if readWeights is None:
+            readWeights = self.computePosteriorProb(reads, mutations)    
+
+
+        Imat = accessoryFunctions.computeInformationMatrix(self.p, self.mu, readWeights, reads, 
+                                                           mutations, self.active_columns, 
+                                                           self.priorA, self.priorB)
+        
+        np.savetxt('imat.txt', Imat)
+
+
+        # compute the inverse of the information matrix
+        try:
+            Imat = np.linalg.inv(Imat)
+        except np.linalg.linalg.LinAlgError as e:
+            raise ConvergenceError('Information matrix invalid: '+str(e), 'END')
+
+        # check to make sure matrix doesn't have negative values
+        if np.min(np.diag(Imat)) < 0:
+            raise ConvergenceError('Information matrix invalid: inverted matrix has negative values', 'END')
+
+        
+        # compute p errors
+        p_err = np.zeros(self.p.shape)
+        # convert imat to stderrs
+        p1 = self.pdim-1
+        p_err[:-1] = np.sqrt(np.diag(Imat[:p1,:p1]))
+
+        # compute error for p[-1] via error propagation (p[-1] = 1 - p[0] - p[1] ...)
+        a = -1* np.ones((1,p1))
+        p_err[-1] = np.sqrt(np.dot( np.dot(a, Imat[:p1, :p1]), a.transpose()))
+        
+        # compute mu errors
+        mu_err = -1*np.ones(self.mu.shape) # initialize to -1, which will be value inactive/invalid
+        
+        for d in range(self.pdim):
+            for i, col in enumerate(self.active_columns):
+                idx = p1 + d*len(self.active_columns) + i
+                mu_err[d, col] = np.sqrt(Imat[idx,idx])
+
+
+        self.p_err = p_err
+        self.mu_err = mu_err
 
 
 
@@ -563,8 +632,11 @@ class BernoulliMixture(object):
         OUT.write('# P\n')
         np.savetxt(OUT, self.p[sortidx], fmt='%.16f', newline=' ')
         
-        OUT.write('\n\n# Mu\n')
-        
+        OUT.write('\n# P_uncertainty\n')
+        np.savetxt(OUT, self.p_err[sortidx], fmt='%.16f', newline=' ')
+
+
+        OUT.write('\n\n# Nt Mu ; Mu_err\n')
         # write out Mu with active and inactive info
         for i in xrange(self.mudim):
             
@@ -579,6 +651,10 @@ class BernoulliMixture(object):
             else:
                 np.savetxt(OUT, self.mu[sortidx,i], fmt='%.16f', newline=' ')
                 
+                OUT.write('; ')
+                np.savetxt(OUT, self.mu_err[sortidx, i], fmt='%.4f', newline=' ')
+
+
                 if i in self.inactive_columns:
                     OUT.write('i')
 
@@ -639,6 +715,8 @@ class BernoulliMixture(object):
             inp.readline()
             self.p = np.array(inp.readline().split(), dtype=float)
             self.pdim = len(self.p)
+            
+
 
             # pop off mu header
             inp.readline()

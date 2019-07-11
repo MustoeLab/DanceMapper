@@ -529,10 +529,111 @@ cdef void readloglike(double[:] loglike, char[:] activestatus, char[:] read, cha
              
 
 
+##################################################################################
+
+def computeInformationMatrix(double[:] p, double[:,::1] mu, double[:,::1] readWeights, 
+                             char[:,::1] reads, char[:,::1] mutations, int[:] activecols,
+                             double[:,::1] priorA, double[:,::1] priorB):
+    """Return information matrix computed based on the data
+    Imatrix is symmetric square np.array of dimension (p - 1) + (p x activecols)
+
+    Matrix is computed from the complete data likelihood.
+    References:
+    T. A. Louis, J. R. Statist. Soc. B (1982)
+    M. J. Walsh, NUWC-NPT Technical Report 11768 (2006)
+    McLachlan and Peel, Finite Mixture Models (2000)
+    """
+    
+    # compute index values used recurrently in loops
+    cdef int ppar = p.shape[0]
+    cdef int ppar1 = ppar-1  
+    cdef int mupar = activecols.shape[0]
+    cdef int imatsize = ppar1 + p.shape[0]*mupar
+    
+
+    # initialize output information matrix
+    cdef double[:,::1] Imat = np.zeros((imatsize, imatsize), dtype=np.float64)
+    
+    # initialize internal variables
+    cdef double[:] svect = np.empty(imatsize, dtype=np.float64)
+    cdef int i,d,j,k
+    cdef int col, idx, idx1, idx2
+    cdef double value
+    
+
+    # I = Sum{ E[Bi] - E[SiSi] + E[Si]*E[Si] } + Iprior
+
+    # iterate over all reads
+    for i in xrange(reads.shape[0]):
+        
+        # compute [x/mu-(1-x)/(1-mu)] values for svect
+        idx = ppar1
+        for d in xrange(ppar):
+            for j in xrange(mupar):
+                
+                col = activecols[j]
+
+                if mutations[i,col]:
+                    svect[idx] = 1/mu[d,col]
+                elif reads[i,col]:
+                    svect[idx] = -1/(1-mu[d,col])
+                
+                idx += 1
+        
+        # add the E[B] contribution (mu-mu diagonals only) to imat
+        # w*[x/mu^2 + (1-x)/(1-mu)^2]
+        for idx in xrange(ppar1, imatsize):
+            d = (idx - ppar1) // mupar 
+            Imat[idx, idx] += readWeights[d,i] * svect[idx]**2 
+    
+
+        # subtract the E[SiSi] contribution (mu-mu terms only)
+        # w*[x/mu-(1-x)/(1-mu)]*[x/mu-(1-x)/(1-mu)] for mu with same d
+        for d in xrange(ppar):
+            for j in xrange(mupar):
+                idx1 = ppar1 + d*mupar + j
+                
+                # handle the diagonal
+                Imat[idx1, idx1] -= readWeights[d,i]*svect[idx1]**2
+
+                for k in xrange(j+1, mupar):
+                    idx2 = ppar1 + d*mupar + k
+                    value = readWeights[d,i]*svect[idx1]*svect[idx2]
+                    Imat[idx1, idx2] -= value
+                    Imat[idx2, idx1] -= value
 
 
+        # complete p portion of svect
+        for d in xrange(ppar1):
+            svect[d] = readWeights[d,i] / p[d] - readWeights[ppar1,i] / p[ppar1]
+        
+        # complete mu portion of svect by multiplying by weights
+        for idx in xrange(ppar1, imatsize):
+            d = (idx - ppar1) // mupar
+            svect[idx] *= readWeights[d,i]
+        
+        # add E[Si]*E[Si] component to Imat
+        for idx1 in xrange(imatsize):
+            
+            # handle the diagonal
+            Imat[idx1,idx1] += svect[idx1]**2
 
+            for idx2 in xrange(idx1+1, imatsize):
+                value = svect[idx1]*svect[idx2]
+                Imat[idx1, idx2] += value
+                Imat[idx2, idx1] += value
+        
 
+    
+    # Compute and add Iprior to Imat (only mu terms have prior)
+    idx = ppar1
+    for d in xrange(ppar):
+        for j in xrange(mupar):
+            Imat[idx,idx] += (priorA[d,j]-1)/mu[d,j]**2 + (priorB[d,j]-1)/(1-mu[d,j])**2
+            idx+=1
+    
+    return np.asarray(Imat)
+    
 
 
 
