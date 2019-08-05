@@ -556,73 +556,58 @@ def computeInformationMatrix(double[:] p, double[:,::1] mu, double[:,::1] readWe
     
     # initialize internal variables
     cdef double[:] svect = np.empty(imatsize, dtype=np.float64)
-    cdef int i,d,j,k
+    cdef int i,j, d, d1, d2
     cdef int col, idx, idx1, idx2
     cdef double value
+    cdef double curweight
     
-
-    # I = Sum{ E[Bi] - E[SiSi] + E[Si]*E[Si] } + Iprior
+    cdef long counter = 0
 
     # iterate over all reads
     for i in xrange(reads.shape[0]):
         
-        # compute [x/mu-(1-x)/(1-mu)] values for svect
-        idx = ppar1
-        for d in xrange(ppar):
-            for j in xrange(mupar):
-                
-                col = activecols[j]
-
-                if mutations[i,col]:
-                    svect[idx] = 1/mu[d,col]
-                elif reads[i,col]:
-                    svect[idx] = -1/(1-mu[d,col])
-                
-                idx += 1
-        
-        # add the E[B] contribution (mu-mu diagonals only) to imat
-        # w*[x/mu^2 + (1-x)/(1-mu)^2]
-        for idx in xrange(ppar1, imatsize):
-            d = (idx - ppar1) // mupar 
-            Imat[idx, idx] += readWeights[d,i] * svect[idx]**2 
-    
-
-        # subtract the E[SiSi] contribution (mu-mu terms only)
-        # w*[x/mu-(1-x)/(1-mu)]*[x/mu-(1-x)/(1-mu)] for mu with same d
-        for d in xrange(ppar):
-            for j in xrange(mupar):
-                idx1 = ppar1 + d*mupar + j
-                
-                # handle the diagonal
-                Imat[idx1, idx1] -= readWeights[d,i]*svect[idx1]**2
-
-                for k in xrange(j+1, mupar):
-                    idx2 = ppar1 + d*mupar + k
-                    value = readWeights[d,i]*svect[idx1]*svect[idx2]
-                    Imat[idx1, idx2] -= value
-                    Imat[idx2, idx1] -= value
-
-
         # complete p portion of svect
         for d in xrange(ppar1):
             svect[d] = readWeights[d,i] / p[d] - readWeights[ppar1,i] / p[ppar1]
         
-        # complete mu portion of svect by multiplying by weights
-        for idx in xrange(ppar1, imatsize):
-            d = (idx - ppar1) // mupar
-            svect[idx] *= readWeights[d,i]
+        # compute mu portion of svect
+        idx = ppar1
+        for d in xrange(ppar):
+            curweight = readWeights[d,i]
+
+            for j in xrange(mupar):
+                col = activecols[j]
+
+                if mutations[i,col]:
+                    svect[idx] = curweight/mu[d,col]
+                elif reads[i,col]:
+                    svect[idx] = -curweight/(1-mu[d,col])
+                else:
+                    svect[idx] = 0
+
+                idx += 1
         
-        # add E[Si]*E[Si] component to Imat
+
         for idx1 in xrange(imatsize):
             
-            # handle the diagonal
-            Imat[idx1,idx1] += svect[idx1]**2
+            d1 = (idx1 - ppar1) // mupar
 
-            for idx2 in xrange(idx1+1, imatsize):
-                value = svect[idx1]*svect[idx2]
-                Imat[idx1, idx2] += value
-                Imat[idx2, idx1] += value
-        
+            curweight = 1-1/readWeights[d1,i]
+
+            for idx2 in xrange(idx1, imatsize):
+                
+                d2 = (idx2 - ppar1) // mupar
+                
+                if d1>0 and d1==d2 and idx1 != idx2:
+                    Imat[idx1,idx2] += svect[idx1]*svect[idx2]*curweight
+                else:
+                    Imat[idx1,idx2] += svect[idx1]*svect[idx2]
+
+    
+    # make transpose
+    for idx1 in xrange(imatsize-1):
+        for idx2 in xrange(idx1+1, imatsize):
+            Imat[idx2, idx1] = Imat[idx1, idx2]
 
     
     # Compute and add Iprior to Imat (only mu terms have prior)

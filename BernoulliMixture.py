@@ -536,6 +536,7 @@ class BernoulliMixture(object):
 
         # check to make sure matrix doesn't have negative values
         if np.min(np.diag(Imat)) < 0:
+            print np.diag(Imat)
             raise ConvergenceError('Information matrix invalid: inverted matrix has negative values', 'END')
 
         
@@ -633,8 +634,10 @@ class BernoulliMixture(object):
         np.savetxt(OUT, self.p[sortidx], fmt='%.16f', newline=' ')
         
         OUT.write('\n# P_uncertainty\n')
-        np.savetxt(OUT, self.p_err[sortidx], fmt='%.16f', newline=' ')
-
+        try:
+            np.savetxt(OUT, self.p_err[sortidx], fmt='%.16f', newline=' ')
+        except TypeError:
+            OUT.write('-- '*self.pdim)
 
         OUT.write('\n\n# Nt Mu ; Mu_err\n')
         # write out Mu with active and inactive info
@@ -652,7 +655,10 @@ class BernoulliMixture(object):
                 np.savetxt(OUT, self.mu[sortidx,i], fmt='%.16f', newline=' ')
                 
                 OUT.write('; ')
-                np.savetxt(OUT, self.mu_err[sortidx, i], fmt='%.4f', newline=' ')
+                try:
+                    np.savetxt(OUT, self.mu_err[sortidx, i], fmt='%.4f', newline=' ')
+                except TypeError:
+                    OUT.write('-- '*self.pdim)
 
 
                 if i in self.inactive_columns:
