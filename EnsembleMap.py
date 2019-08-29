@@ -1002,7 +1002,8 @@ def parseArguments():
     
     quality = parser.add_argument_group('quality filtering options')
     quality.add_argument('--mincoverage', type=int, help='Minimum coverage (integer number of nts) required for read to be included in cacluations')
-     
+    quality.add_argument('--minrxbg', type=float, default=0.002, help='Set nts with rx-bg less than this to inactive')
+
     ############################################################
     # Fitting options
 
@@ -1013,7 +1014,7 @@ def parseArguments():
     fitopt.add_argument('--badcol_cutoff', type=int, default=3, help='Inactivate column after it causes a bad solution X number of times (default=3)')
     fitopt.add_argument('--writeintermediates', action='store_true', help='Write each BM solution to file with specified prefix. Will be saved as prefix-intermediate-[component]-[trial].bm')
 
-    fitopt.add_argument('--priorWeight', type=float, default=0.01, help='Relative weight of dynamic prior on Mu (default=0.1). Dynamic prior method is disabled by passing -1, upon which a static naive prior is used. Valid weights are <0 and <1. Default = 0.01 (dynamic method enabled).')
+    fitopt.add_argument('--priorWeight', type=float, default=0.05, help='Relative weight of dynamic prior on Mu (default=0.1). Dynamic prior method is disabled by passing -1, upon which a static naive prior is used. Valid weights are <0 and <1. Default = 0.05 (dynamic method enabled).')
 
 
     ############################################################
@@ -1087,6 +1088,7 @@ if __name__=='__main__':
     
     EM = EnsembleMap(modfile=args.modified_parsed, untfile=args.untreated_parsed,
                      profilefile=args.profile, 
+                     minrxbg = args.minrxbg,
                      minreadcoverage=args.mincoverage, verbal=args.suppressverbal)
        
     if args.fit:

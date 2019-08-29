@@ -120,7 +120,7 @@ class ConvergenceMonitor(object):
         for i in self.active_columns:
             if np.any(mu[:,i] < 5e-5):
                 toolo.append(i)
-            if np.any(mu[:,i] > 0.5):
+            if np.any(mu[:,i] > 0.3):
                 toohi.append(i)
         
         if len(toohi)>0:
@@ -139,9 +139,10 @@ class ConvergenceMonitor(object):
         
         activemu = mu[:, self.active_columns]
 
-        excludepercent = 98
+        excludepercent = 99
 
-        rmsdiff = 10
+        rmsdiff = 10 # initialize at high value
+
         for i,j in itertools.combinations(range(mu.shape[0]), 2):
             
             d = np.square(activemu[i,:] - activemu[j,:])
@@ -166,7 +167,8 @@ class ConvergenceMonitor(object):
 
 
     def postConvergeCheck(self, p, mu):
-        
+        """ Check that params conform to expected bounds as final convergence check """
+
         activemu = mu[:, self.active_columns]
         
         toolo = []
@@ -175,7 +177,7 @@ class ConvergenceMonitor(object):
         for i in self.active_columns:
             if np.any(mu[:,i] < 1e-4):
                 toolo.append(i)
-            if np.any(mu[:,i] > 0.5):
+            if np.any(mu[:,i] > 0.3):
                 toohi.append(i)
         
         if len(toolo) > 0:
@@ -184,7 +186,54 @@ class ConvergenceMonitor(object):
         if len(toohi) > 0:
             raise ConvergenceError('High Converged Mu',self.step, toohi)
         
+        
+        self.artifactCheck(p, mu)
 
+
+
+    def artifactCheck(self, p, mu):
+        """Check for artifacts where one highly reactive nt absorbs all mutation 
+        signal, causing preceding 5 nts to have very low reactivity due to 
+        alignment constraint. This gives characteristic anticorrelated local 
+        reactivity profile. Will throw ConvergenceError if found
+        """
+
+        activemu = mu[:, self.active_columns]
+
+        # iterate through all params
+        for i,j in itertools.permutations(range(mu.shape[0]), 2):
+ 
+            # identify positions with very high difference in reactivity
+            ratio = activemu[i]/activemu[j] 
+            hivalues = np.nonzero(ratio > 500)[0]
+            
+            # check each hi value
+            for idx in hivalues:
+                
+                allzero = True
+                # scan upstream 5 nts
+                for m in range(1,6):
+                    
+                    try:
+                        ntidx = self.active_columns[idx] - self.active_columns[idx-m]
+                    except IndexError:
+                        break
+
+                    if ntidx < 6 and activemu[i,idx-m]>0.001:
+                        allzero = False
+
+                
+                if allzero:
+                    raise ConvergenceError('Anticorrelated Mu artifact', self.step, idx)
+
+
+
+        
+            
+
+
+
+        
 
 
 
@@ -455,7 +504,7 @@ class BernoulliMixture(object):
         self.converged = CM.converged
         self.cError = CM.error
         
-        t1 = time.time()
+        
         # make sure information matrix is defined
         if self.converged:
             try:
@@ -463,8 +512,6 @@ class BernoulliMixture(object):
             except ConvergenceError as e:
                 self.converged = False
                 self.cError = e
-
-        print '***',time.time()-t1
 
 
         # compute loglike and BIC        
@@ -514,7 +561,7 @@ class BernoulliMixture(object):
     def computeUncertainty(self, reads, mutations, readWeights=None):
         """Compute the uncertainty of the model parameters from the information matrix
         
-        NOTE: will raise ConvergenceError exception if information matrix is poorly defined
+        Will raise ConvergenceError exception if information matrix is poorly defined
         """
        
         if readWeights is None:
@@ -534,17 +581,29 @@ class BernoulliMixture(object):
         except np.linalg.linalg.LinAlgError as e:
             raise ConvergenceError('Information matrix invalid: '+str(e), 'END')
 
+        
+        Imat_diag = np.diag(Imat)
+        p1 = self.pdim-1
+        nactive = len(self.active_columns)
+
         # check to make sure matrix doesn't have negative values
-        if np.min(np.diag(Imat)) < 0:
-            print np.diag(Imat)
+        if np.min(Imat_diag) < 0:
+            
+            # print out negative entries so we know
+            negindices = np.where(Imat_diag<0)[0]
+            for i in negindices:
+                if i < p1:
+                    print('\tp = {0} ; Imat = {1}'.format(self.p, Imat_diag[:p1]))
+                else:
+                    muidx = self.active_columns[(i-p1) % nactive]
+                    print('\t{0}  mu = {1} ; Imat = {2}'.format(muidx, mu[:,muidx], Imat_diag[i]))               
+
             raise ConvergenceError('Information matrix invalid: inverted matrix has negative values', 'END')
 
         
-        # compute p errors
+        # compute dim-1 p errors from Imat
         p_err = np.zeros(self.p.shape)
-        # convert imat to stderrs
-        p1 = self.pdim-1
-        p_err[:-1] = np.sqrt(np.diag(Imat[:p1,:p1]))
+        p_err[:-1] = np.sqrt(Imat_diag[:p1]))
 
         # compute error for p[-1] via error propagation (p[-1] = 1 - p[0] - p[1] ...)
         a = -1* np.ones((1,p1))
@@ -722,7 +781,9 @@ class BernoulliMixture(object):
             self.p = np.array(inp.readline().split(), dtype=float)
             self.pdim = len(self.p)
             
-
+            # pop off p error
+            inp.readline()
+            inp.readline()
 
             # pop off mu header
             inp.readline()
