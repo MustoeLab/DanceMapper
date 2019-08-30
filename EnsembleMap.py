@@ -83,7 +83,7 @@ class EnsembleMap(object):
     
 
 
-    def readPrimaryData(self, modfilename, minreadcoverage=None, **kwargs):
+    def readPrimaryData(self, modfilename, minreadcoverage=None, undersample=-1, **kwargs):
         
         # Determine mincoverage quality filter
         if minreadcoverage is None and self.minreadcoverage is None:
@@ -108,7 +108,8 @@ class EnsembleMap(object):
 
 
         # read in the matrices
-        reads, mutations = accessoryFunctions.fillReadMatrices(modfilename, self.seqlen, self.minreadcoverage)
+        reads, mutations = accessoryFunctions.fillReadMatrices(modfilename, self.seqlen, 
+                                                               self.minreadcoverage, undersample=undersample)
         
         print('{} reads for clustering\n'.format(reads.shape[0]))
 
@@ -1003,6 +1004,8 @@ def parseArguments():
     quality = parser.add_argument_group('quality filtering options')
     quality.add_argument('--mincoverage', type=int, help='Minimum coverage (integer number of nts) required for read to be included in cacluations')
     quality.add_argument('--minrxbg', type=float, default=0.002, help='Set nts with rx-bg less than this to inactive')
+    quality.add_argument('--undersample', type=int, default=-1, help='Only cluster with this number of reads. By default this option is disabled and all reads are used (default=-1).')
+    
 
     ############################################################
     # Fitting options
@@ -1089,7 +1092,9 @@ if __name__=='__main__':
     EM = EnsembleMap(modfile=args.modified_parsed, untfile=args.untreated_parsed,
                      profilefile=args.profile, 
                      minrxbg = args.minrxbg,
-                     minreadcoverage=args.mincoverage, verbal=args.suppressverbal)
+                     minreadcoverage=args.mincoverage, 
+                     undersample=undersample,
+                     verbal=args.suppressverbal)
        
     if args.fit:
         

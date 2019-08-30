@@ -18,7 +18,7 @@ from dSFMT cimport dsfmt_t, dsfmt_init_gen_rand, dsfmt_genrand_close_open
 ###########################################################################
 
 
-def fillReadMatrices(str inputFile, int seqlen, int mincoverage):
+def fillReadMatrices(str inputFile, int seqlen, int mincoverage, int undersample=-1):
     """ inputFile = path to the classified mutations files """
     
     # mem alloc for reading the file using c
@@ -44,6 +44,7 @@ def fillReadMatrices(str inputFile, int seqlen, int mincoverage):
     cdef int linenum = -1
     cdef int skipped_reads = 0
     cdef int skipped_coverage = 0
+    cdef float t1
 
     # iterate through lines
     while True and linenum<1e12:
@@ -86,6 +87,21 @@ def fillReadMatrices(str inputFile, int seqlen, int mincoverage):
  
     if skipped_coverage>0:
         print("skipped {0} reads not passing {1} coverage threshold".format(skipped_coverage, mincoverage))
+    
+    
+    if undersample > 0:
+        linenum = len(allreadstr)
+        
+        if undersample < linenum:
+            print("Dataset could not be undersampled at {0} :: using all {1} available reads".format(undersample, linenum))
+
+        else:
+            # this is not optimized, but should work for now
+            idx = np.random.choice(linenum, undersample, replace=False)
+            t1 = time.time()
+            allreadstr = [allreadstr[i] for i in idx]
+            allmutstr = [allmutstr[i] for i in idx]
+            print('Undersample time = {:.3f}'.format(time.time()-t1))
 
     return np.array(allreadstr, dtype=np.int8), np.array(allmutstr, dtype=np.int8)
 

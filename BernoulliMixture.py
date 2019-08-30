@@ -71,12 +71,14 @@ class ConvergenceMonitor(object):
         else:
             try:
                 self.checkParamBounds(p, mu)
-                self.checkDegenerate(p,mu)
+                self.checkMuRatio(mu)
+                self.checkDegenerate(mu)
                 self.checkConvergence(p, mu)
 
             except ConvergenceError as e:
                 self.error = e
                 self.iterate = False
+
 
         
     def checkConvergence(self, p, mu):
@@ -96,7 +98,7 @@ class ConvergenceMonitor(object):
         mdiff = np.abs(activemu - self.lastmu) 
        
         if max(np.max(pdiff), np.max(mdiff)) < self.convergeThresh:
-            self.postConvergeCheck(p, mu)
+            #self.postConvergeCheck(p, mu)
             self.converged = True
             self.iterate = False
         
@@ -108,31 +110,45 @@ class ConvergenceMonitor(object):
     def checkParamBounds(self, p, mu):
         """Make sure p and mu params are within allowed bounds"""
         
-
         minp = np.min(p)
         if minp < 0.001:
             raise ConvergenceError('Low Population = {0}'.format(minp), self.step)
-        
-        # go through active columns and make sure params are legit
-        toohi = []
-        toolo = []
-            
-        for i in self.active_columns:
-            if np.any(mu[:,i] < 5e-5):
-                toolo.append(i)
-            if np.any(mu[:,i] > 0.3):
-                toohi.append(i)
-        
-        if len(toohi)>0:
-            vals = [list(mu[:,i]) for i in toohi]
-            raise ConvergenceError('Columns with high Mu', self.step, toohi)
-        
-        if len(toolo)>0:
-            vals = [list(mu[:,i]) for i in toolo]
-            raise ConvergenceError('Columns with low Mu', self.step, toolo)
- 
 
-    def checkDegenerate(self, p, mu):
+        # go through active columns and make sure params aren't too low
+        activemu = mu[:, self.active_columns]
+        
+        minvals = np.min(activemu, axis=0)
+        lowidx = np.where(minvals < 1e-4)[0]
+
+        if len(lowidx)>0:
+            raise ConvergenceError('Columns with low Mu', self.step, lowidx)
+    
+    
+
+    def checkMuRatio(self, mu, ratioCutoff=4.6):
+        """Check to make sure that mu ratio does not exceed ratioCutoff
+        
+        ratioCutoff is ln-space; default value = 100"""
+        
+        activemu = mu[:, self.active_columns]
+        
+        hivalues = set()
+
+        # iterate through all params
+        for i,j in itertools.combinations(range(mu.shape[0]), 2):
+            
+            # compute ratio of reactivities
+            ratio = np.abs(np.log(activemu[i]/activemu[j]))
+            hivalues.update( np.nonzero(ratio > ratioCutoff)[0] )
+        
+        hivalues = sorted(hivalues)
+
+        if len(hivalues)>0:
+            raise ConvergenceError('Columns with high mu ratio', self.step, hivalues)
+
+
+
+    def checkDegenerate(self, mu):
         """Check to see if converging to degenerate parameters
         Uses trend of rmsdiff to prematurely terminate 
         """
@@ -166,28 +182,7 @@ class ConvergenceMonitor(object):
 
 
 
-    def postConvergeCheck(self, p, mu):
-        """ Check that params conform to expected bounds as final convergence check """
-
-        activemu = mu[:, self.active_columns]
-        
-        toolo = []
-        toohi = []
-
-        for i in self.active_columns:
-            if np.any(mu[:,i] < 1e-4):
-                toolo.append(i)
-            if np.any(mu[:,i] > 0.3):
-                toohi.append(i)
-        
-        if len(toolo) > 0:
-            raise ConvergenceError('Low Converged Mu', self.step, toolo)
-        
-        if len(toohi) > 0:
-            raise ConvergenceError('High Converged Mu',self.step, toohi)
-        
-        
-        self.artifactCheck(p, mu)
+        #self.artifactCheck(p, mu)
 
 
 
@@ -205,7 +200,7 @@ class ConvergenceMonitor(object):
  
             # identify positions with very high difference in reactivity
             ratio = activemu[i]/activemu[j] 
-            hivalues = np.nonzero(ratio > 500)[0]
+            hivalues = np.nonzero(ratio > 100)[0]
             
             # check each hi value
             for idx in hivalues:
@@ -596,14 +591,16 @@ class BernoulliMixture(object):
                     print('\tp = {0} ; Imat = {1}'.format(self.p, Imat_diag[:p1]))
                 else:
                     muidx = self.active_columns[(i-p1) % nactive]
-                    print('\t{0}  mu = {1} ; Imat = {2}'.format(muidx, mu[:,muidx], Imat_diag[i]))               
-
+                    print('\t{0}  mu = {1} ; Imat = {2}'.format(muidx, self.mu[:,muidx], Imat_diag[i]))               
+            self.writeModel('IM_inversionErr_params.bm')
+            self.computeModelLikelihood(reads, mutations)
+            print self.BIC
             raise ConvergenceError('Information matrix invalid: inverted matrix has negative values', 'END')
 
         
         # compute dim-1 p errors from Imat
         p_err = np.zeros(self.p.shape)
-        p_err[:-1] = np.sqrt(Imat_diag[:p1]))
+        p_err[:-1] = np.sqrt(Imat_diag[:p1])
 
         # compute error for p[-1] via error propagation (p[-1] = 1 - p[0] - p[1] ...)
         a = -1* np.ones((1,p1))
