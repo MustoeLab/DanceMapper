@@ -1093,7 +1093,7 @@ if __name__=='__main__':
                      profilefile=args.profile, 
                      minrxbg = args.minrxbg,
                      minreadcoverage=args.mincoverage, 
-                     undersample=undersample,
+                     undersample=args.undersample,
                      verbal=args.suppressverbal)
        
     if args.fit:

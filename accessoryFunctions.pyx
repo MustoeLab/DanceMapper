@@ -92,16 +92,18 @@ def fillReadMatrices(str inputFile, int seqlen, int mincoverage, int undersample
     if undersample > 0:
         linenum = len(allreadstr)
         
-        if undersample < linenum:
+        if linenum < undersample:
             print("Dataset could not be undersampled at {0} :: using all {1} available reads".format(undersample, linenum))
 
         else:
+            print("Undersampling {0} reads from {1} total passing quality thresholds".format(undersample, linenum))
+
             # this is not optimized, but should work for now
             idx = np.random.choice(linenum, undersample, replace=False)
-            t1 = time.time()
+            print(time.time())
             allreadstr = [allreadstr[i] for i in idx]
             allmutstr = [allmutstr[i] for i in idx]
-            print('Undersample time = {:.3f}'.format(time.time()-t1))
+            print(time.time())
 
     return np.array(allreadstr, dtype=np.int8), np.array(allmutstr, dtype=np.int8)
 
