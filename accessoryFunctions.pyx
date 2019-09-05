@@ -608,18 +608,23 @@ def computeInformationMatrix(double[:] p, double[:,::1] mu, double[:,::1] readWe
 
         for idx1 in xrange(imatsize):
             
-            d1 = (idx1 - ppar1) // mupar
+            d1 = (idx1 - ppar1) / mupar
 
             curweight = 1-1/readWeights[d1,i]
 
             for idx2 in xrange(idx1, imatsize):
                 
-                d2 = (idx2 - ppar1) // mupar
+                d2 = (idx2 - ppar1) / mupar
                 
-                if d1>0 and d1==d2 and idx1 != idx2:
+                # Handle E[SiSj] terms for mu elements of imat 
+                # Only applies for mu elements (d1>=0); d1==d2; and not diagonol (idx1 != idx2)
+                # all other E[SiSj] terms cancel (==0)
+                if idx1>=ppar1 and d1==d2 and idx1 != idx2:
                     Imat[idx1,idx2] += svect[idx1]*svect[idx2]*curweight
+                # otherwise just have E[Si]E[Sj] terms
                 else:
                     Imat[idx1,idx2] += svect[idx1]*svect[idx2]
+                
 
     
     # make transpose
@@ -632,7 +637,8 @@ def computeInformationMatrix(double[:] p, double[:,::1] mu, double[:,::1] readWe
     idx = ppar1
     for d in xrange(ppar):
         for j in xrange(mupar):
-            Imat[idx,idx] += (priorA[d,j]-1)/mu[d,j]**2 + (priorB[d,j]-1)/(1-mu[d,j])**2
+            col = activecols[j]
+            Imat[idx,idx] += (priorA[d,col]-1)/mu[d,col]**2 + (priorB[d,col]-1)/(1-mu[d,col])**2
             idx+=1
     
     return np.asarray(Imat)

@@ -19,7 +19,7 @@ from pairmapper import PairMapper
 
 class EnsembleMap(object):
 
-    def __init__(self, modfile=None, untfile=None, profilefile=None, **kwargs):
+    def __init__(self, modfile=None, untfile=None, profilefile=None, seqlen=None, **kwargs):
         """Define important global parameters"""
     
         # reads contains positions that are 'read'
@@ -62,7 +62,7 @@ class EnsembleMap(object):
         if modfile is not None:
             self.readPrimaryData(modfile, **kwargs)
         
-        # if provide, now update profile.backprofile with rate computed 
+        # if provided, now update profile.backprofile with rate computed 
         # using reads filtered according to same criterai for primary data
         if untfile is not None:
             self.computeBGprofile(untfile, **kwargs)
@@ -143,9 +143,11 @@ class EnsembleMap(object):
  
 
 
-    def initializeActiveCols(self, invalidcols=[], invalidrate=0.0001, maxbg=0.02, minrxbg=0.002, verbal = True, **kwargs):
+    def initializeActiveCols(self, invalidcols=[], invalidrate=0.0001, 
+                             maxbg=0.02, minrxbg=0.002, verbal = True, **kwargs):
         """Apply quality filters to eliminate noisy nts from EM fitting
         invalidcols = list of columns to set to invalid
+        invalidrate = columns with rates below this value are set to invalid
         minrx       = minimum signal (react. rate)
         bgarray     = array (or txt file of array) of background signal
         maxbg       = maximum allowable background signal
@@ -199,7 +201,7 @@ class EnsembleMap(object):
         
         
         invalidcols.sort()
-        self.invalid_columns = np.array(invalidcols)
+        self.invalid_columns = np.array(invalidcols, dtype=int)
         
         if verbal:
             print("Total invalid nts: {}".format(self.ntindices[invalidcols]))
@@ -210,7 +212,7 @@ class EnsembleMap(object):
         ###################################
         
         if self.profile is not None:
-
+            
             with np.errstate(divide='ignore',invalid='ignore'):
                 diff = self.profile.rawprofile - self.profile.backprofile
                 inactive = (diff < minrxbg)
@@ -257,7 +259,7 @@ class EnsembleMap(object):
                 return
 
             # make sure they aren't conflicting
-            if np.sum(np.isin(activecols, inactivecols))>0 and \
+            if np.sum(np.isin(activecols, inactivecols))>0 or \
                     np.sum(np.isin(inactivecols, activecols))>0:
                 raise ValueError('activecols and inactivecols are conflicting')
             
@@ -326,39 +328,18 @@ class EnsembleMap(object):
         """Compute the null model (i.e. mixture of one)"""
         
         # create 1D BM object and assign its p/mu params
-        mudim = self.seqlen
-        BM = BernoulliMixture(pdim=1, mudim=mudim, 
+        BM = BernoulliMixture(pdim=1, mudim=self.seqlen, 
                               active_columns=self.active_columns,
                               inactive_columns=self.inactive_columns,
                               idxmap=self.ntindices)
         
-         
-        BM.p = np.array([1.0])
-        
-        # compute 1D mu params
-        mu = np.sum(self.mutations, axis=0, dtype=np.float_)
-        
-        musum = np.sum(self.reads, axis=0, dtype=np.float_)
-        mask = np.where(musum > 0)[0]
-
-        mu[mask] = mu[mask] / musum[mask]
-
-        mask = np.where(musum==0)[0]
-        mu[mask] = 0
-
-        mu = mu.reshape((1, mudim))
-        BM.mu = mu  
-        BM.converged = True
-        
-        c = np.sum(self.reads, axis=0, dtype=np.float_)
-        
-        BM.computeModelLikelihood(self.reads, self.mutations)
+        BM.fitEM(self.reads, self.mutations)
         
         return BM
 
 
 
-    def fitEM(self, components, trials=5, soln_termcount=3, badcolcount=2, priorWeight=-1,
+    def fitEM(self, components, trials=5, soln_termcount=3, badcolcount=3, priorWeight=-1,
               verbal=False, writeintermediate=None, **kwargs):
         """Fit Bernoulli Mixture model of a specified number of components.
         Trys a number of random starting conditions. Terminates after finding a 
@@ -383,7 +364,7 @@ class EnsembleMap(object):
         """
         
         
-        # array for each col; incremented each time a col causes failure of BM soln
+        # array for each col; incremented when a col causes failure of BM soln
         badcolumns = np.zeros(self.seqlen, dtype=np.int32)
          
         
@@ -391,17 +372,7 @@ class EnsembleMap(object):
             print('active_columns not set... initializing')
             self.initializeActiveCols(verbal=True)
 
-        
-        # don't need to fit for c=1
-        if components == 1:
-            BM = self.compute1ComponentModel()
-
-            if writeintermediate is not None:
-                BM.writeModel('{}-1.txt'.format(writeintermediate))
-
-            return BM, []
-
-
+       
         bestfit = None
         fitlist = []
         bestfitcount = 1
@@ -421,6 +392,7 @@ class EnsembleMap(object):
                                   inactive_columns=self.inactive_columns, 
                                   idxmap=self.ntindices)
             
+
             # set up the prior
             if priorWeight > 0:
                 BM.setDynamicPriors(priorWeight, self.profile.backprofile)
@@ -432,6 +404,8 @@ class EnsembleMap(object):
             if BM.converged:
                 
                 fitlist.append(BM)
+                badcolumns[:] = 0 # reset badcolumns
+                
 
                 if writeintermediate is not None:
                     BM.writeModel('{0}-intermediate-{1}-{2}.bm'.format(writeintermediate, components, tt))
@@ -444,7 +418,7 @@ class EnsembleMap(object):
                 # this func will refit best fit BM if columns aren't equal
                 compareBM = self.compareBMs(BM, bestfit, verbal=verbal)
                 
-                # if bestfit couldn't be refit, then this indicates soln is unstable
+                # if bestfit couldn't be refit, then this suggests prior soln is unstable
                 # Assign new solution as bestfit
                 if compareBM is None:
                     bestfit = BM
@@ -473,7 +447,7 @@ class EnsembleMap(object):
                 bc = np.where(badcolumns>=badcolcount)[0]
                 
                 self.setActiveColumnsInactive(bc, verbal=verbal)
-            
+               
                 # zero out columns that we've now set to inactive so won't be triggered in future
                 badcolumns[bc] = 0
 
@@ -496,30 +470,59 @@ class EnsembleMap(object):
 
     
     def compareBMs(self, BMnew, BMold, verbal=False):
-        """Check if BMnew and BMold are the same"""
+        """Check if BMnew and BMold have the same set of active_columns
+        If not, refit BMold and return
+        """
 
-        # check to see if this solution has been reached already
+        # check if BMold has the same active_columns
         if np.array_equal(BMnew.active_columns, BMold.active_columns):
             return BMold
- 
+        
 
+        # check if we have previously reft
+        if hasattr(BMold, 'alternativesolns'):
+            for soln in BMold.alternativesolns:
+                if np.array_equal(BMnew.active_columns, soln.active_colums):
+                    print('Using previous best refit')
+                    return soln
+        
+
+        # if we get here then we need to refit
         if verbal:  
             print('Refitting prior {0}-component model with different inactive columns'.format(BMold.pdim))
-
+        
 
         compareBM = BMold.copy()
+        
+        # make sure we aren't copying over alternativesolns
+        try:
+            del compareBM.alternativesolns
+        except AttributeError:
+            pass
+
         compareBM.set_active_columns(BMnew.active_columns)
-        compareBM.refit_new_active(self.reads, self.mutations, verbal=verbal, maxiterations=20)
+        compareBM.refit_new_active(self.reads, self.mutations, verbal=verbal, maxiterations=100)
                     
         if not compareBM.converged:
             if verbal: print('\t{0}-component model could not be refit!'.format(BMold.pdim))
             return None
-            
-        # check that new solution hasn't changed too much!
+        
+        
+        print('\tRefit best {0}-component model, BIC={1:.1f}'.format(compareBM.pdim, compareBM.BIC))
+
+
+        # check that new solution hasn't changed too much
         pdiff, mudiff = BMold.modelDifference(compareBM, func=np.max)
         if pdiff > 0.005 or mudiff > 0.005:
             if verbal: print('\tSignificant dP={0:.3f} or dMu={0:.3f} after refitting!'.format(pdiff, mudiff))
             return None
+        
+
+        if hasattr(BMold, 'alternativesolns'):
+            BMold.alternativesolns.append(compareBM)
+        else:
+            setattr(BMold, 'aternativesolns', [compareBM])
+
 
         return compareBM
 
@@ -532,8 +535,7 @@ class EnsembleMap(object):
         until model with best BIC is found. 
         Dynamically updates inactive list as problematic columns are identified
 
-        maxcomponents           = maximum number of components to attempt fitting
-        trials = 
+        maxcomponents = maximum number of components to attempt fitting
 
         **kwargs passed onto fitEM method"""
 
@@ -584,7 +586,7 @@ class EnsembleMap(object):
             
 
             # if BIC is not better, terminate search
-            if bestBM.BIC > compareBM.BIC-10:
+            if bestBM.BIC > compareBM.BIC-100:
                 break
             else:
                 overallBestBM = bestBM
@@ -598,7 +600,8 @@ class EnsembleMap(object):
     
         
         # reset the active/inactive cols if necessary
-        self.setColumns(activecols=overallBestBM.active_columns, inactivecols=overallBestBM.inactive_columns)    
+        self.setColumns(activecols=overallBestBM.active_columns, 
+                        inactivecols=overallBestBM.inactive_columns)    
         
         overallBestBM.imputeInactiveParams(self.reads, self.mutations)
         
@@ -624,173 +627,13 @@ class EnsembleMap(object):
             if f is bestfit:
                 bmcode='Best'
 
-            print("\tModel {0}  BIC={1:.1f}  Max_dP={2:.4f}  Max_dMu={3:.4f} {4}".format(i+1, f.BIC, pdiff, mudiff,bmcode))
+            print("\tModel {0}  Active={1}  BIC={2:.1f}  Max_dP={3:.4f}  Max_dMu={4:.4f} {5}".format(i+1, len(f.active_columns), f.BIC, pdiff, mudiff,bmcode))
 
 
         print('*'*65+'\n')
  
 
 
-
-
-    def compute_IM_Error(self):
-        """
-        Estimate error of MLE parameters for Bernoulli Mixture model from
-        the observed information matrix
-        Note -- only determines errors for active params
-
-        Matrix is computed from the complete data likelihood.
-        References:
-        T. A. Louis, J. R. Statist. Soc. B (1982)
-        M. J. Walsh, NUWC-NPT Technical Report 11768 (2006)
-        McLachlan and Peel, Finite Mixture Models (2000)
-        """
-        
-        activemu = self.mu[:,self.active_mask]
-
-        W = self.computePosteriorProb(self.p, activemu)
-
-        # compute size of I matrix
-        seqdim = activemu.shape[1]
-        pdim = self.components-1
-        idim = pdim + seqdim*self.components
-    
-        Imat = np.zeros((idim, idim))
-        eS = np.zeros(idim)
-        eB = np.zeros(idim)
-        diagidx = np.diag_indices(idim)   
-        
-
-        #iterate through the reads
-        for i in xrange(self.numreads):
-        
-            # compute expectation of gradient
-            # compute gradient for p variables (note last p is not included, since 
-            # it can be expressed as 1-sum of other ps)
-            ip = W[i,:]/self.p
-            ip -= ip[-1]
-            eS[:pdim] = ip[:-1]
-
-            # compute gradient for mu variables
-            idx = pdim
-            for g in xrange(self.components):
-            
-                Wg = W[i,g]
-                grad = self.reads[i,:]/activemu[g,:] - self.ireads[i,:]/(1-activemu[g,:])
-                
-                ss = Wg * np.dot( grad.reshape((seqdim, 1)), grad.reshape((1,seqdim)) )
-                
-                sele = slice(idx, idx+seqdim)
-                Imat[sele, sele] -= ss
-            
-                eS[sele] = Wg*grad
-                eB[sele] = Wg*( self.reads[i,:]/activemu[g,:]**2 + self.ireads[i,:]/(1-activemu[g,:])**2 )
-            
-                idx += seqdim
-    
-            Imat += np.dot( eS.reshape((idim, 1)), eS.reshape((1,idim)) )
-            Imat[diagidx] += eB
-
-    
-        # take inverse
-        validmat = True
-        try:
-            Imat = np.linalg.inv(Imat)
-        except np.linalg.linalg.LinAlgError:
-            validmat = False
-    
-        if validmat and np.min(np.diag(Imat)) < 0:
-            validmat = False
-
-        if not validmat:
-            return None, None
-
-
-        # convert to stderrs
-        p_err = np.zeros(self.p.shape)
-        p_err[:-1] = np.sqrt(np.diag(Imat[:pdim,:pdim]))
-    
-        # propagate p errors to calculate error of last population parameter
-        a = -1* np.ones((1,pdim))
-        p_err[-1] = np.sqrt(np.dot( np.dot(a, Imat[:pdim, :pdim]), a.transpose()))
-    
-        # fill mu_error array
-        mu_err = np.zeros(activemu.shape)
-        idx = pdim
-        for g in xrange(self.components):
-            mu_err[g,:] = np.sqrt( np.diag( Imat[idx:idx+seqdim, idx:idx+seqdim] ))
-            idx += seqdim
-        
-        # convert to seqlen dimension; inactive nts given error = -1
-        totmu = -1*np.ones(self.mu.shape)
-        totmu[:,self.active_mask] = mu_err
-
-        return p_err, totmu
-    
-
-    def bootstrap(self, n=100, randinit = False, verbal=False):
-        """
-        
-        get it to return subsample from RINGexperiment
-        have bootstrap calculations run in a different method
-            --perhaps cluster.py?
-
-        """
-        # create new BM obj
-        boot = RINGexperiment()
-        boot.numreads = self.numreads
-        boot.seqlen = self.seqlen
-        boot.active_mask = self.active_mask
-        boot.inactive_mask = self.inactive_mask
-
-        # containers for bootstrap samples
-        psamp = np.zeros((n, self.components))
-        musamp = np.zeros((n, self.components, self.seqlen))
-        
-        # indicator func indicating which samples converged
-        converged = np.ones(n, dtype=bool)
-        
-        p_i = self.p
-        mu_i = self.mu[:,self.active_mask]
-
-        for i in xrange(n):
-            
-            s = np.random.choice(self.numreads, self.numreads)
-            boot.reads = self.reads[s,:]
-            boot.ireads = self.ireads[s,:]
-
-            boot.inactive_reads = self.inactive_reads[s,:]
-            boot.inactive_ireads = self.inactive_ireads[s,:]
-
-            if randinit:
-                #BM = BernoulliMixture(p_initial = BM.p, mu_initial )
-                p_i, mu_i = self.random_init_params(self.p.size)
-             
-            try:
-                p, mu = boot.fitEM(p_i, mu_i, verbal=verbal)
-            except ConvergenceError:
-                converged[i]=False
-                continue
-            
-            boot.p = p
-            boot.mu[:, self.active_mask] = mu
-            boot.imputeInactiveParams()
-            
-            idx = alignParams(boot.mu, self.mu)
-            psamp[i,:] = boot.p[idx]
-            musamp[i,:,:] = boot.mu[idx, :]
-            
-
-        p_err  = np.dstack((np.percentile(psamp[converged,:], 2.5, axis=0),
-                            np.percentile(psamp[converged,:], 97.5, axis=0)))
-        
-        p_err = p_err.reshape((self.components, 2))
-
-        mu_err = np.dstack((np.percentile(musamp[converged,:,:], 2.5, axis=0),
-                            np.percentile(musamp[converged,:,:], 97.5, axis=0)))
-        
-        return p_err, mu_err
-    
     
 
     def computeNormalizedReactivities(self):
@@ -1017,7 +860,7 @@ def parseArguments():
     fitopt.add_argument('--badcol_cutoff', type=int, default=3, help='Inactivate column after it causes a bad solution X number of times (default=3)')
     fitopt.add_argument('--writeintermediates', action='store_true', help='Write each BM solution to file with specified prefix. Will be saved as prefix-intermediate-[component]-[trial].bm')
 
-    fitopt.add_argument('--priorWeight', type=float, default=0.05, help='Relative weight of dynamic prior on Mu (default=0.1). Dynamic prior method is disabled by passing -1, upon which a static naive prior is used. Valid weights are <0 and <1. Default = 0.05 (dynamic method enabled).')
+    fitopt.add_argument('--priorWeight', type=float, default=0.01, help='Relative weight of dynamic prior on Mu (default=0.1). Dynamic prior method is disabled by passing -1, upon which a static naive prior is used. Valid weights are <0 and <1. Default = 0.01 (dynamic method enabled).')
 
 
     ############################################################

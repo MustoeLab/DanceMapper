@@ -40,7 +40,7 @@ class ConvergenceError(Exception):
 class ConvergenceMonitor(object):
     """Object to monitor convergence of EM algorithm"""
 
-    def __init__(self, activecols, convergeThresh=1e-4, maxsteps=1000, initsteps=21):
+    def __init__(self, activecols, convergeThresh=1e-4, maxsteps=1000, initsteps=41):
 
         self.step = 0
         self.lastp = None
@@ -98,10 +98,11 @@ class ConvergenceMonitor(object):
         mdiff = np.abs(activemu - self.lastmu) 
        
         if max(np.max(pdiff), np.max(mdiff)) < self.convergeThresh:
-            #self.postConvergeCheck(p, mu)
+            self.artifactCheck(mu)
             self.converged = True
             self.iterate = False
         
+
         self.lastp = np.copy(p)
         self.lastmu = np.copy(activemu)
 
@@ -118,17 +119,17 @@ class ConvergenceMonitor(object):
         activemu = mu[:, self.active_columns]
         
         minvals = np.min(activemu, axis=0)
-        lowidx = np.where(minvals < 1e-4)[0]
+        lowcolumns = self.active_columns[np.where(minvals < 1e-4)]
 
-        if len(lowidx)>0:
-            raise ConvergenceError('Columns with low Mu', self.step, lowidx)
+
+        if len(lowcolumns)>0:
+            raise ConvergenceError('Columns with low Mu', self.step, lowcolumns)
     
     
 
-    def checkMuRatio(self, mu, ratioCutoff=4.6):
+    def checkMuRatio(self, mu, ratioCutoff=5.3):
         """Check to make sure that mu ratio does not exceed ratioCutoff
-        
-        ratioCutoff is ln-space; default value = 100"""
+        ratioCutoff is ln-space; ln(200)=5.3; ln(100)=4.6"""
         
         activemu = mu[:, self.active_columns]
         
@@ -141,9 +142,10 @@ class ConvergenceMonitor(object):
             ratio = np.abs(np.log(activemu[i]/activemu[j]))
             hivalues.update( np.nonzero(ratio > ratioCutoff)[0] )
         
-        hivalues = sorted(hivalues)
+        hivalues = self.active_columns[sorted(hivalues)]
 
         if len(hivalues)>0:
+            #print mu[:, hivalues]
             raise ConvergenceError('Columns with high mu ratio', self.step, hivalues)
 
 
@@ -182,11 +184,7 @@ class ConvergenceMonitor(object):
 
 
 
-        #self.artifactCheck(p, mu)
-
-
-
-    def artifactCheck(self, p, mu):
+    def artifactCheck(self, mu):
         """Check for artifacts where one highly reactive nt absorbs all mutation 
         signal, causing preceding 5 nts to have very low reactivity due to 
         alignment constraint. This gives characteristic anticorrelated local 
@@ -198,23 +196,23 @@ class ConvergenceMonitor(object):
         # iterate through all params
         for i,j in itertools.permutations(range(mu.shape[0]), 2):
  
-            # identify positions with very high difference in reactivity
+            # identify positions with high difference in reactivity
             ratio = activemu[i]/activemu[j] 
             hivalues = np.nonzero(ratio > 100)[0]
             
-            # check each hi value
+            # scan upstream of each hi ratio value to see if artifact
             for idx in hivalues:
                 
                 allzero = True
-                # scan upstream 5 nts
                 for m in range(1,6):
                     
                     try:
-                        ntidx = self.active_columns[idx] - self.active_columns[idx-m]
+                        ntdiff = self.active_columns[idx] - self.active_columns[idx-m]
                     except IndexError:
                         break
-
-                    if ntidx < 6 and activemu[i,idx-m]>0.001:
+                    
+                    # if at least one upstream nt is decently reactive, not an artifact
+                    if ntdiff < 6 and activemu[i,idx-m]>0.001:
                         allzero = False
 
                 
@@ -284,7 +282,8 @@ class BernoulliMixture(object):
         self.p_err = None
         self.mu_err = None
         self.converged = False
-        
+        self.imputed = False
+
         self.cError = None
         self.loglike = None
         self.BIC = None
@@ -410,6 +409,33 @@ class BernoulliMixture(object):
         
 
 
+    def compute1ComponentModel(self, reads, mutations):
+        
+        if self.active_columns is None:
+            self.set_active_columns()
+
+        activecols = self.active_columns
+
+        self.p = np.array([1.0])
+        
+        if self.mu_initial is None:
+            self.initMu()
+        
+        if self.mu is None:
+            self.mu = np.copy( self.mu_initial )
+
+        # compute params
+        mutsum = np.sum(mutations, axis=0, dtype=np.float_)
+        readsum = np.sum(reads, axis=0, dtype=np.float_)
+        
+        self.mu[:,activecols] = mutsum[activecols]/readsum[activecols]
+        
+        self.converged = True
+        
+        self.computeModelLikelihood(reads, mutations)
+        
+
+
 
     def computePosteriorProb(self, reads, mutations):
         
@@ -435,19 +461,21 @@ class BernoulliMixture(object):
         
         if self.dynamicprior:
             self.updateDynamicPrior( reads.shape[0], verbal=verbal )
-
+            
+            
         accessoryFunctions.maximizeMu(self.mu, W, reads, mutations, 
                                       self.active_columns, self.priorA, self.priorB)
         
     
-    
+
+
     def updateDynamicPrior(self, numreads, verbal=False):
     
         totalweight = self.dynamic_weight*numreads*self.p.reshape((-1,1))
-        self.priorA = totalweight*self.dynamic_baserate
-        self.priorB = totalweight*(1-self.dynamic_baserate)
+        self.priorA = totalweight*self.dynamic_baserate+1
+        self.priorB = totalweight*(1-self.dynamic_baserate)+1
         
-        
+
 
     def fitEM(self, reads, mutations, maxiterations = 1000, convergeThresh=1e-4, verbal=False, **kwargs):
         """Fit model to data using EM 
@@ -457,6 +485,11 @@ class BernoulliMixture(object):
                          falls below this threshold
         """
         
+
+        if self.pdim == 1:
+            self.compute1ComponentModel(reads, mutations)
+            return
+
 
         # make sure parameters are initialized, etc.
         if self.p_initial is None:
@@ -516,7 +549,14 @@ class BernoulliMixture(object):
         # print outcome
         if verbal:
             if self.converged:
-                print('EM converged in {0} steps ({1:.0f} seconds); BIC={2:.1f}'.format(CM.step, time.time()-timestart, self.BIC))
+                
+                print('\tValid solution!')
+                msg = '\tP = ['
+                for i in xrange(self.pdim):
+                    msg += ' {0:.3f} +/- {1:.3f},'.format(self.p[i], self.p_err[i])
+                print(msg[:-1]+' ]')
+                print('\tEM converged in {0} steps ({1:.0f} seconds); BIC={2:.1f}'.format(CM.step, time.time()-timestart, self.BIC))
+            
             else:
                 print(self.cError.__str__(self.idxmap))
             
@@ -567,35 +607,32 @@ class BernoulliMixture(object):
                                                            mutations, self.active_columns, 
                                                            self.priorA, self.priorB)
         
-        np.savetxt('imat.txt', Imat)
-
 
         # compute the inverse of the information matrix
         try:
             Imat = np.linalg.inv(Imat)
         except np.linalg.linalg.LinAlgError as e:
             raise ConvergenceError('Information matrix invalid: '+str(e), 'END')
-
         
+                
         Imat_diag = np.diag(Imat)
         p1 = self.pdim-1
         nactive = len(self.active_columns)
+        
 
         # check to make sure matrix doesn't have negative values
-        if np.min(Imat_diag) < 0:
+        if np.min(Imat_diag[:p1]) < 0:
+            raise ConvergenceError('Information matrix has undefined p errors', 'END')
+
+
+        elif np.min(Imat_diag[p1:]) < 0:
             
             # print out negative entries so we know
-            negindices = np.where(Imat_diag<0)[0]
-            for i in negindices:
-                if i < p1:
-                    print('\tp = {0} ; Imat = {1}'.format(self.p, Imat_diag[:p1]))
-                else:
-                    muidx = self.active_columns[(i-p1) % nactive]
-                    print('\t{0}  mu = {1} ; Imat = {2}'.format(muidx, self.mu[:,muidx], Imat_diag[i]))               
-            self.writeModel('IM_inversionErr_params.bm')
-            self.computeModelLikelihood(reads, mutations)
-            print self.BIC
-            raise ConvergenceError('Information matrix invalid: inverted matrix has negative values', 'END')
+            #negindices = np.where(Imat_diag<0)[0]
+            #for i in negindices:
+            #    muidx = self.active_columns[(i-p1) % nactive]
+            #    print('\t{0}  mu = {1} ; Imat = {2}'.format(muidx, self.mu[:,muidx], Imat_diag[i]))               
+            raise ConvergenceError('Information matrix has undefined mu errors', 'END')
 
         
         # compute dim-1 p errors from Imat
@@ -606,6 +643,17 @@ class BernoulliMixture(object):
         a = -1* np.ones((1,p1))
         p_err[-1] = np.sqrt(np.dot( np.dot(a, Imat[:p1, :p1]), a.transpose()))
         
+        
+        # reject if population errors are high
+        if np.max(p_err) > 0.02:
+            print('\tSolution found:')
+            msg = '\tP = ['
+            for i in xrange(self.pdim):
+                msg += ' {0:.3f} +/- {1:.3f},'.format(self.p[i], p_err[i])
+            print(msg[:-1]+' ]')
+            raise ConvergenceError('Solution is poorly defined: high P errors', 'END')
+
+
         # compute mu errors
         mu_err = -1*np.ones(self.mu.shape) # initialize to -1, which will be value inactive/invalid
         
@@ -705,8 +753,13 @@ class BernoulliMixture(object):
                 OUT.write('{0} '.format(i))
 
 
+            # write out nan for invalid columns
             if i not in self.inactive_columns and i not in self.active_columns:
                 OUT.write('nan '*self.pdim)
+
+            elif i in self.inactive_columns and not self.imputed:
+                OUT.write('{0} ; {0} i'.format('-- '*self.pdim))
+
             else:
                 np.savetxt(OUT, self.mu[sortidx,i], fmt='%.16f', newline=' ')
                 
@@ -739,10 +792,10 @@ class BernoulliMixture(object):
     
 
         OUT.write('\n# PriorA\n')
-        np.savetxt(OUT, self.priorA, fmt='%.16f', newline=' ')
+        np.savetxt(OUT, self.priorA, fmt='%.16f')
 
         OUT.write('\n\n# PriorB\n')
-        np.savetxt(OUT, self.priorB, fmt='%.16f', newline=' ')
+        np.savetxt(OUT, self.priorB, fmt='%.16f')
 
 
 
@@ -802,18 +855,29 @@ class BernoulliMixture(object):
 
                 idxmap.append(int(spl[0]))
                 
-                vals = map(float, spl[1:1+self.pdim])
-                
-                if vals[0] != vals[0]:
-                    mu.append([-999]*self.pdim)
 
-                elif vals[0] == vals[0] and spl[-1] == 'i':
+                try:
+                    vals = map(float, spl[1:1+self.pdim])
+                    
+                    # invalid nt
+                    if vals[0] != vals[0]:
+                        mu.append([-999]*self.pdim)
+                        continue # skip to next position so not added to inactive/active list
+                    else:
+                        mu.append(vals)
+                
+                except ValueError as e:
+                    if spl[1] == '--':
+                        mu.append([-1]*self.pdim)
+                    else:
+                        raise e
+                
+                if spl[-1] == 'i':
                     inactives.append(i)
-                    mu.append(vals)
                 else:
                     actives.append(i)
-                    mu.append(vals)
 
+ 
 
             self.idxmap = np.array(idxmap)
             self.active_columns = np.array(actives, dtype=np.int32)
@@ -824,6 +888,7 @@ class BernoulliMixture(object):
 
             self.mudim = self.mu.shape[1]
             
+            # read in initial p
             inp.readline()
             self.p_initial = np.array(inp.readline().split(), dtype=float)
             
@@ -834,7 +899,8 @@ class BernoulliMixture(object):
             
             i = -1
             read = True
-
+            
+            # read in initial mu
             while read:
                 i += 1
                 spl = inp.readline().split()
@@ -842,15 +908,22 @@ class BernoulliMixture(object):
                     break
 
                 self.mu_initial[:, i] = map(float, spl[1:])
+            
+            # read in priorA
+            inp.readline()
+            priorA = []
+            for i in range(self.pdim):
+                priorA.append(map(float, inp.readline().split()))
+            self.priorA = priorA
 
             inp.readline()
-            self.priorA = np.array(inp.readline().split(), dtype=float)
-
             inp.readline()
-            inp.readline()
-            self.priorB = np.array(inp.readline().split(), dtype=float)
-
+            priorB = []
+            for i in range(self.pdim):
+                priorB.append(map(float, inp.readline().split()))
+            self.priorB = priorB
         
+
 
     def imputeInactiveParams(self, reads, mutations):
         """ Impute inactive Mu parameters using parameters of the base Bernoulli Mixture
@@ -885,10 +958,12 @@ class BernoulliMixture(object):
         # look at whether the populations are shifting;
         # if they shift too much, there is a problem...
         pdiff = np.max(np.abs(newp - self.p))
-        if pdiff > 0.01:
+        if pdiff > 0.005:
             raise ConvergenceError('Large P shift during inactive column imputation = {0}'.format(pdiff),'term')
 
         
+        self.imputed = True
+
 
 
     def refit_new_active(self, reads, mutations, **kwargs):
@@ -901,6 +976,7 @@ class BernoulliMixture(object):
         self.mu_initial = np.copy(self.mu)
         
         self.converged = False
+        self.BIC = None
 
         self.fitEM(reads, mutations, **kwargs)
         
