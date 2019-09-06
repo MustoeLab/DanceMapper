@@ -119,6 +119,7 @@ class ConvergenceMonitor(object):
         activemu = mu[:, self.active_columns]
         
         minvals = np.min(activemu, axis=0)
+
         lowcolumns = self.active_columns[np.where(minvals < 1e-4)]
 
 
@@ -450,7 +451,7 @@ class BernoulliMixture(object):
         
         # convert to posterior prob
         W /= W.sum(axis=0)
-
+        
         return W
  
 
@@ -524,10 +525,10 @@ class BernoulliMixture(object):
             W = self.computePosteriorProb(reads, mutations)
             
             self.maximization(reads, mutations, W)
-
+            
             # this will throw ConvergenceErrors if bad soln
             CM.update(self.p, self.mu)
-            
+               
         
         self.converged = CM.converged
         self.cError = CM.error
@@ -645,13 +646,13 @@ class BernoulliMixture(object):
         
         
         # reject if population errors are high
-        if np.max(p_err) > 0.02:
-            print('\tSolution found:')
-            msg = '\tP = ['
-            for i in xrange(self.pdim):
-                msg += ' {0:.3f} +/- {1:.3f},'.format(self.p[i], p_err[i])
-            print(msg[:-1]+' ]')
-            raise ConvergenceError('Solution is poorly defined: high P errors', 'END')
+        #if np.max(p_err) > 0.1:
+        #    print('\tSolution found:')
+        #    msg = '\tP = ['
+        #    for i in xrange(self.pdim):
+        #        msg += ' {0:.3f} +/- {1:.3f},'.format(self.p[i], p_err[i])
+        #    print(msg[:-1]+' ]')
+        #    raise ConvergenceError('Solution is poorly defined: high P errors', 'END')
 
 
         # compute mu errors
@@ -977,7 +978,10 @@ class BernoulliMixture(object):
         
         self.converged = False
         self.BIC = None
-
+        
+        # we always want to suppress verbal for refitting -- confusing!
+        #if 'verbal' in kwargs:
+        #    del kwargs['verbal']
         self.fitEM(reads, mutations, **kwargs)
         
         

@@ -33,7 +33,9 @@ class SynBernoulliMixture():
         else:
             self.p = []
             self.mu = []
-    
+            
+        self.bgrate = None
+
     
     def compileModel(self):
         """Convert arrays to numpy arrays and check for errors"""
@@ -111,15 +113,16 @@ class SynBernoulliMixture():
         reads = np.ones((num_reads, seqlen), dtype=np.int8)
         
         # zero out data
-        reads[np.random.random(reads.shape) < nodata_rate] = 0
+        mask = np.random.random(reads.shape) < nodata_rate
+        reads[mask] = 0
+        muts[mask] = 0
+        
+        return reads, muts
 
         
-        return reads, mutations
-
-        
 
 
-    def generateEMobject(self, num_reads, bgrates, nodata_rate=0.05, **kwargs):
+    def generateEMobject(self, num_reads, nodata_rate=0.05, **kwargs):
 
 
         EM = EnsembleMap(seqlen=self.mu.shape[1])     
@@ -134,15 +137,35 @@ class SynBernoulliMixture():
 
         EM.profile.rawprofile = mutrate
         
-        EM.profile.backprofile = bgrates
+        if self.bgrate is not None:
+            EM.profile.backprofile = self.bgrate
+            # normalize with DMS false because we don't have sequence info 
+            # (and it doesn't matter anyways)
+            EM.profile.backgroundSubtract(normalize=True, DMS=False) 
 
-        EM.profile.backgroundSubtract(normalize=True, DMS=True)
 
         EM.initializeActiveCols(**kwargs)
 
         return EM
 
-   
+    
+    def writeParams(self, output):
+        
+        sortidx = range(len(self.p))
+        sortidx.sort(key=lambda x: self.p[x], reverse=True)
+
+
+        with open(output, 'w') as OUT:
+            
+            OUT.write('# P\n')
+            np.savetxt(OUT, self.p[sortidx], fmt='%.4f', newline=' ')
+            OUT.write('\n\n#Mu ; bg\n')
+
+            for i in range(self.mu.shape[1]):
+                np.savetxt(OUT, self.mu[sortidx,i], fmt='%.4f', newline=' ')
+                OUT.write('; {0:.4f}\n'.format(self.bgrate[i]))
+
+
 
     def simulateCorrelations(self, modelnum, corrlist):
         """Add in correlations to synthetic reads originating from model=modelnum

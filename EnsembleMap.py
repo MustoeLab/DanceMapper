@@ -1,6 +1,6 @@
 
 import numpy as np
-import sys, argparse, warnings
+import sys, argparse
 
 import accessoryFunctions
 from BernoulliMixture import *
@@ -339,8 +339,8 @@ class EnsembleMap(object):
 
 
 
-    def fitEM(self, components, trials=5, soln_termcount=3, badcolcount=3, priorWeight=-1,
-              verbal=False, writeintermediate=None, **kwargs):
+    def fitEM(self, components, trials=5, soln_termcount=3, badcolcount0=3, badcolcount=5, 
+              priorWeight=-1, verbal=False, writeintermediate=None, **kwargs):
         """Fit Bernoulli Mixture model of a specified number of components.
         Trys a number of random starting conditions. Terminates after finding a 
         repeated valid solution, a repeated set of 'invalid' column solutions, 
@@ -349,7 +349,8 @@ class EnsembleMap(object):
         components = number of model components to fit
         trials = max number of fitting trials to run
         soln_termcount = terminate after this many identical solutions founds
-        badcolcount = set columns inactive after this many times of causing BM failure
+        badcolcount0 = inactivate columns after this many failures with no valid solns
+        badcolcount  = inactivate columns after this many failures (with valid solns)
         
         priorWeight = weight of dynamic prior used during fitting. If -1, disable
 
@@ -363,6 +364,8 @@ class EnsembleMap(object):
             fitlist     = list of other BernoulliMixture objects
         """
         
+        if verbal and priorWeight>0:
+            print('Using priorWeight={0}'.format(priorWeight))
         
         # array for each col; incremented when a col causes failure of BM soln
         badcolumns = np.zeros(self.seqlen, dtype=np.int32)
@@ -427,7 +430,7 @@ class EnsembleMap(object):
 
                 pdiff, mudiff = BM.modelDifference(compareBM, func=np.max)
 
-                if pdiff < 0.005 and mudiff < 0.005:
+                if pdiff < 0.01 and mudiff < 0.01:
                     bestfitcount += 1
                     if BM.BIC < compareBM.BIC:
                         bestfit = BM
@@ -444,8 +447,11 @@ class EnsembleMap(object):
                 # (BM.cError.badcolumns will be empty if not badcolumn error)
                 badcolumns[BM.cError.badcolumns] += 1
                 
-                bc = np.where(badcolumns>=badcolcount)[0]
-                
+                if len(fitlist)==0:
+                    bc = np.where(badcolumns>=badcolcount0)[0]
+                else:
+                    bc = np.where(badcolumns>=badcolcount)[0]
+
                 self.setActiveColumnsInactive(bc, verbal=verbal)
                
                 # zero out columns that we've now set to inactive so won't be triggered in future
@@ -489,7 +495,7 @@ class EnsembleMap(object):
 
         # if we get here then we need to refit
         if verbal:  
-            print('Refitting prior {0}-component model with different inactive columns'.format(BMold.pdim))
+            print('\tRefitting prior {0}-component model with different inactive columns'.format(BMold.pdim))
         
 
         compareBM = BMold.copy()
@@ -501,27 +507,25 @@ class EnsembleMap(object):
             pass
 
         compareBM.set_active_columns(BMnew.active_columns)
-        compareBM.refit_new_active(self.reads, self.mutations, verbal=verbal, maxiterations=100)
+        compareBM.refit_new_active(self.reads, self.mutations, verbal=verbal)
                     
         if not compareBM.converged:
             if verbal: print('\t{0}-component model could not be refit!'.format(BMold.pdim))
             return None
         
         
-        print('\tRefit best {0}-component model, BIC={1:.1f}'.format(compareBM.pdim, compareBM.BIC))
+        #print('\tRefit best {0}-component model, BIC={1:.1f}'.format(compareBM.pdim, compareBM.BIC))
 
 
         # check that new solution hasn't changed too much
         pdiff, mudiff = BMold.modelDifference(compareBM, func=np.max)
-        if pdiff > 0.005 or mudiff > 0.005:
-            if verbal: print('\tSignificant dP={0:.3f} or dMu={0:.3f} after refitting!'.format(pdiff, mudiff))
-            return None
-        
+        if pdiff > 0.005 or mudiff > 0.01:
+            if verbal: print('\tWARNING! Significant dP={0:.3f} or dMu={1:.3f} after refitting!'.format(pdiff, mudiff))
 
         if hasattr(BMold, 'alternativesolns'):
             BMold.alternativesolns.append(compareBM)
         else:
-            setattr(BMold, 'aternativesolns', [compareBM])
+            setattr(BMold, 'alternativesolns', [compareBM])
 
 
         return compareBM
@@ -581,7 +585,7 @@ class EnsembleMap(object):
             compareBM = self.compareBMs(bestBM, overallBestBM, verbal=verbal)
 
             if compareBM is None:
-                warnings.warn("{0}-component model did not converge under new inactive list\nUnable to perform necessary {0} vs. {1} component comparison. Selecting prior {0}-component model.".format(c-1, c))
+                print("{0}-component model did not converge under new inactive list\nUnable to perform necessary {0} vs. {1} component comparison. Selecting prior {0}-component model.".format(c-1, c))
                 break
             
 
@@ -857,7 +861,7 @@ def parseArguments():
     fitopt.add_argument('--fit', action='store_true', help='Flag specifying to fit data')
     fitopt.add_argument('--maxcomponents', type=int, default=5, help='Maximum number of components to fit (default=5)')
     fitopt.add_argument('--trials', type=int, default=10, help='Maximum number of fitting trials at each component number (default=10)')
-    fitopt.add_argument('--badcol_cutoff', type=int, default=3, help='Inactivate column after it causes a bad solution X number of times (default=3)')
+    fitopt.add_argument('--badcol_cutoff', type=int, default=5, help='Inactivate column after it causes a failure X number of times *after* a valid soln has already been found (default=5)')
     fitopt.add_argument('--writeintermediates', action='store_true', help='Write each BM solution to file with specified prefix. Will be saved as prefix-intermediate-[component]-[trial].bm')
 
     fitopt.add_argument('--priorWeight', type=float, default=0.01, help='Relative weight of dynamic prior on Mu (default=0.1). Dynamic prior method is disabled by passing -1, upon which a static naive prior is used. Valid weights are <0 and <1. Default = 0.01 (dynamic method enabled).')
