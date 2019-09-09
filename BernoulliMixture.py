@@ -923,40 +923,53 @@ class BernoulliMixture(object):
 
 
     def imputeInactiveParams(self, reads, mutations):
-        """ Impute inactive Mu parameters using parameters of the base Bernoulli Mixture
-        to assign component weights to each model.
+        """Compute inactive Mu parameters
+        EM is used to find optimal inactive mu, keeing p and active mus fixed
         """
         
         if self.inactive_columns is None or len(self.inactive_columns)==0:
             return
 
 
-        newp = np.copy(self.p)
-        
+       
         combined_columns = np.append(self.active_columns, self.inactive_columns)
-
 
         # get initial posterior probabilities (uses only active columns)
         W = self.computePosteriorProb(reads, mutations)
         
-        for t in xrange(5):
-            
+        lastmu = np.copy(self.mu)
+        converged = False
+        nsteps = 0
+        while not converged and nsteps<100:
+
             # update posterior probs based on inactive_column info
-            if t > 0:
+            if nsteps > 0:
                 accessoryFunctions.loglikelihoodmatrix(W, reads, mutations, combined_columns, self.mu, self.p)
                 W = np.exp(W)
                 W /= W.sum(axis=0)
-
-            accessoryFunctions.maximizeP(newp, W) 
+            
+            # update inactive mu
             accessoryFunctions.maximizeMu(self.mu, W, reads, mutations, self.inactive_columns, self.priorA, self.priorB)
         
+            if np.max(np.abs(lastmu-self.mu)) < 1e-4:
+                converged = True
+            
+            lastmu = np.copy(self.mu)
+            nsteps+=1
 
+        
+        # update newp so that we can track implied population shift
+        newp = np.copy(self.p)
+        accessoryFunctions.maximizeP(newp, W) 
 
-        # look at whether the populations are shifting;
-        # if they shift too much, there is a problem...
-        pdiff = np.max(np.abs(newp - self.p))
-        if pdiff > 0.005:
-            raise ConvergenceError('Large P shift during inactive column imputation = {0}'.format(pdiff),'term')
+        print('Inactive parameters converged in {0} steps'.format(nsteps))
+        print('\tPopulation computed using active+inactive = {0}'.format(newp))
+        print('\tPopulation computed using only active     = {0}'.format(self.p))
+        print('\t(active-only populations are used)')
+        
+        if np.max(np.abs(newp - self.p)) > 0.01:
+            print('WARNING: Imputed inactive parameters imply signification population shift')
+        
 
         
         self.imputed = True
