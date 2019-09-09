@@ -45,7 +45,7 @@ class SynBernoulliMixture():
             self.mu = np.vstack(self.mu)
             self.p = np.array(self.p)
         
-        if self.p.sum() != 1:
+        if np.abs(1-self.p.sum()) > 1e-8:
             raise AttributeError('Model populations don\'t sum to 1!')
         if self.p.size != self.mu.shape[0]:
             raise AttributeError('P and mu have inconsistent dimensions: p={0}, mu={1}'.format(self.p.size, self.mu.shape))

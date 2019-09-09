@@ -193,6 +193,8 @@ class ConvergenceMonitor(object):
         """
 
         activemu = mu[:, self.active_columns]
+        
+        badidxs = []
 
         # iterate through all params
         for i,j in itertools.permutations(range(mu.shape[0]), 2):
@@ -218,7 +220,10 @@ class ConvergenceMonitor(object):
 
                 
                 if allzero:
-                    raise ConvergenceError('Anticorrelated Mu artifact', self.step, idx)
+                    badidxs.append(idx)
+
+        if len(badidxs) > 0:
+            raise ConvergenceError('Anticorrelated Mu artifact', self.step, badidxs)
 
 
 
@@ -618,33 +623,20 @@ class BernoulliMixture(object):
                 
         Imat_diag = np.diag(Imat)
         p1 = self.pdim-1
-        nactive = len(self.active_columns)
-        
-
-        # check to make sure matrix doesn't have negative values
-        if np.min(Imat_diag[:p1]) < 0:
-            raise ConvergenceError('Information matrix has undefined p errors', 'END')
-
-
-        elif np.min(Imat_diag[p1:]) < 0:
-            
-            # print out negative entries so we know
-            #negindices = np.where(Imat_diag<0)[0]
-            #for i in negindices:
-            #    muidx = self.active_columns[(i-p1) % nactive]
-            #    print('\t{0}  mu = {1} ; Imat = {2}'.format(muidx, self.mu[:,muidx], Imat_diag[i]))               
-            raise ConvergenceError('Information matrix has undefined mu errors', 'END')
-
         
         # compute dim-1 p errors from Imat
         p_err = np.zeros(self.p.shape)
-        p_err[:-1] = np.sqrt(Imat_diag[:p1])
-
+        p_err[:-1] = Imat_diag[:p1]
+        
         # compute error for p[-1] via error propagation (p[-1] = 1 - p[0] - p[1] ...)
         a = -1* np.ones((1,p1))
-        p_err[-1] = np.sqrt(np.dot( np.dot(a, Imat[:p1, :p1]), a.transpose()))
+        p_err[-1] = np.dot( np.dot(a, Imat[:p1, :p1]), a.transpose())
+ 
+        if np.min(p_err) < 0:
+            raise ConvergenceError('Information matrix has undefined p errors', 'END')
         
-        
+        p_err = np.sqrt(p_err)
+
         # reject if population errors are high
         #if np.max(p_err) > 0.1:
         #    print('\tSolution found:')
@@ -653,6 +645,10 @@ class BernoulliMixture(object):
         #        msg += ' {0:.3f} +/- {1:.3f},'.format(self.p[i], p_err[i])
         #    print(msg[:-1]+' ]')
         #    raise ConvergenceError('Solution is poorly defined: high P errors', 'END')
+
+
+        if np.min(Imat_diag[p1:]) < 0:
+            raise ConvergenceError('Information matrix has undefined mu errors', 'END')
 
 
         # compute mu errors
@@ -940,7 +936,7 @@ class BernoulliMixture(object):
         combined_columns = np.append(self.active_columns, self.inactive_columns)
 
 
-        # get initial posterior probabilities
+        # get initial posterior probabilities (uses only active columns)
         W = self.computePosteriorProb(reads, mutations)
         
         for t in xrange(5):

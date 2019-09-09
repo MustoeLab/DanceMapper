@@ -488,7 +488,7 @@ class EnsembleMap(object):
         # check if we have previously reft
         if hasattr(BMold, 'alternativesolns'):
             for soln in BMold.alternativesolns:
-                if np.array_equal(BMnew.active_columns, soln.active_colums):
+                if np.array_equal(BMnew.active_columns, soln.active_columns):
                     print('Using previous best refit')
                     return soln
         
@@ -589,12 +589,18 @@ class EnsembleMap(object):
                 break
             
 
+            deltaBIC = bestBM.BIC-compareBM.BIC
+            
+            if verbal:
+                print("{0}-component model BIC={1:.1f} ==> dBIC={2:.1f}".format(c-1, compareBM.BIC, deltaBIC))
+
+
             # if BIC is not better, terminate search
-            if bestBM.BIC > compareBM.BIC-100:
+            if deltaBIC > -46: # p>1e10
                 break
             else:
                 overallBestBM = bestBM
-                if verbal: 
+                if verbal:
                     print("{0}-component model assigned as new best model!".format(c))
                     
             
