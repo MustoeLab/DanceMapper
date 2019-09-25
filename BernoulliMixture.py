@@ -3,8 +3,11 @@
 import numpy as np
 import itertools, sys, copy, time
 from collections import deque
-import accessoryFunctions
 
+try:
+    import accessoryFunctions
+except:
+    print('WARNING: Could not import accessoryFunctions!')
 
 
 class ConvergenceError(Exception):
@@ -13,8 +16,7 @@ class ConvergenceError(Exception):
     def __init__(self, msg, step, badcolumns = []):
         """msg = identifying message
         step = abortion step
-        p = population parameters at time of abortion
-        mu = mu params at time of abortion
+        badcolumns = list of failure columns
         """
         self.msg = msg
         self.step = step
@@ -141,24 +143,21 @@ class ConvergenceMonitor(object):
             
             # compute ratio of reactivities
             ratio = np.abs(np.log(activemu[i]/activemu[j]))
-            hivalues.update( np.nonzero(ratio > ratioCutoff)[0] )
+            hivalues.update( np.where(ratio > ratioCutoff)[0] )
         
         hivalues = self.active_columns[sorted(hivalues)]
 
         if len(hivalues)>0:
-            #print mu[:, hivalues]
             raise ConvergenceError('Columns with high mu ratio', self.step, hivalues)
 
 
 
-    def checkDegenerate(self, mu):
+    def checkDegenerate(self, mu, excludepercent=99):
         """Check to see if converging to degenerate parameters
         Uses trend of rmsdiff to prematurely terminate 
         """
         
         activemu = mu[:, self.active_columns]
-
-        excludepercent = 99
 
         rmsdiff = 10 # initialize at high value
 
@@ -201,9 +200,9 @@ class ConvergenceMonitor(object):
  
             # identify positions with high difference in reactivity
             ratio = activemu[i]/activemu[j] 
-            hivalues = np.nonzero(ratio > 100)[0]
+            hivalues = np.where(ratio > 100)[0]
             
-            # scan upstream of each hi ratio value to see if artifact
+            # scan 5' of each hi ratio value to see if artifact
             for idx in hivalues:
                 
                 allzero = True
@@ -243,7 +242,7 @@ class BernoulliMixture(object):
 
     def __init__(self, pdim = None, mudim = None, p_initial=None, mu_initial=None,
                  active_columns = None, inactive_columns = None, idxmap = None,
-                 priorA=2, priorB=2, **kwargs):
+                 priorA=2, priorB=2):
         """Flexibly initialize BM object
         pdim             = dimension of the p vector -- i.e. number of model components
         mudim            = dimension of the mu vector -- i.e. number of data columns
@@ -257,7 +256,7 @@ class BernoulliMixture(object):
         priorB     = int or arraylike of B parameters for the beta prior
 
         Note that if p_initial and/or mu_initial are provided, their dimension
-                will overide components, ncols parameters
+                will override components, ncols parameters
         """
         
         
@@ -270,13 +269,13 @@ class BernoulliMixture(object):
             self.pdim = self.p_initial.size
         
         if self.mu_initial is not None:
-            self.mudim = self.mu_initial.size
+            self.mudim = self.mu_initial.shape[1]
         
         if self.pdim is not None and self.p_initial is None:
             self.initP()
         
         if self.mudim is not None and self.mu_initial is None:
-            self.initMu(**kwargs)
+            self.initMu()
         
         if self.pdim is not None and self.mudim is not None:
             self.setConstantPriors(priorA, priorB)
@@ -297,7 +296,7 @@ class BernoulliMixture(object):
         self.idxmap = idxmap
 
         self.active_columns = None
-        self.inactive_columns = None
+        self.inactive_columns = np.array([], dtype=np.int32)
 
         if inactive_columns is not None:
             self.inactive_columns = np.array(inactive_columns, dtype=np.int32)
@@ -325,24 +324,24 @@ class BernoulliMixture(object):
         
         try:
             if cols is None:
-                if self.inactive_columns is not None:
-                    cols = np.arange(self.mudim)
-                    mask = np.isin(cols, self.inactive_columns, invert=True)
-                    self.active_columns = np.array(cols[mask], dtype=np.int32)
-
-                else:
-                    self.active_columns = np.arange(self.mudim, dtype=np.int32)
+                cols = np.arange(self.mudim)
+                mask = np.isin(cols, self.inactive_columns, invert=True)
+                self.active_columns = np.array(cols[mask], dtype=np.int32)
 
             else:
                 self.active_columns = np.array(cols, dtype=np.int32)    
-        
+                
+                # make sure that no cols are double-listed
+                self.inactive_columns = np.array([i for i in self.inactive_columns if i not in self.active_columns])
+
+
 
         except TypeError:
             
             if cols is None and self.mudim is None:
                 raise TypeError("mudim is not defined")
             else:
-                raise TypeError("cols={} is not a valid argument".format(cols))
+                raise TypeError("{} is not a valid cols argument".format(cols))
 
     
 
@@ -356,7 +355,7 @@ class BernoulliMixture(object):
         self.converged = False
     
 
-    def initMu(self, mu_lowb = 0.005, mu_upb=0.15):
+    def initMu(self):
         """Compute random initial starting conditions for Mu, bounded by lowb and upb"""
         
         if self.pdim is None:
@@ -364,9 +363,6 @@ class BernoulliMixture(object):
         if self.mudim is None:
             raise AttributeError("mudim is not defined")
 
-        #mu = np.random.random((self.pdim, self.mudim))
-        #self.mu_initial = mu*(mu_upb-mu_lowb) + mu_lowb
-        
         self.mu_initial = np.random.beta(1,40, (self.pdim, self.mudim))+0.001
         self.converged = False
 
@@ -374,28 +370,22 @@ class BernoulliMixture(object):
 
     def setConstantPriors(self, priorA, priorB):
         """set the beta priors
-        priorA and priorB can be int or arraylike. If arraylike, must be 1D mudim array
+        priorA and priorB can be int or arraylike
         """
         
-        if not isinstance(priorA, (float, int)):
-            priorA = np.asarray(priorA)
-            if priorA.shape[-1] != self.mudim:
-                raise IndexError("priorA size = {0} is not equal to mudim = {1}".format(priorA.size, self.mudim))
-            if len(priorA.shape) == 1:
-                priorA = priorA*np.ones((self.pdim, self.mudim))
-
-        else:
+        # set priorA
+        try:
             priorA = priorA*np.ones((self.pdim, self.mudim))
+        except ValueError:
+            raise ValueError('priorA shape={0} does not match mudim={1}'.format(np.asarray(priorA).shape, self.mudim))
+        
 
-        if not isinstance(priorB, (float, int)):
-            priorB = np.asarray(priorB)
-            if priorB.shape[-1] != self.mudim:
-                raise IndexError("priorB size = {0} is not equal to mudim = {1}".format(priorB.size, self.mudim))
-            if len(priorB.shape) == 1:
-                priorB = priorB*np.ones((self.pdim, self.mudim))
-        else:
+        # set priorB
+        try:
             priorB = priorB*np.ones((self.pdim, self.mudim))
-
+        except ValueError:
+            raise ValueError('priorB shape={0} does not match mudim={1}'.format(np.asarray(priorB).shape, self.mudim))
+        
 
         self.priorA = priorA
         self.priorB = priorB
@@ -407,6 +397,9 @@ class BernoulliMixture(object):
 
         if not 0<weight<=1:
             raise ValueError('DynamicPrior weight = {} is invalid, must be 0< <=1'.format(weight))
+        
+        if baserate.shape[0] != self.mudim:
+            raise ValueError('Baserate dimension={0} does not match mudim={1}'.format(baserate.shape[0], self.mudim))
 
         self.dynamic_weight = weight
         self.dynamic_baserate = baserate
@@ -461,12 +454,12 @@ class BernoulliMixture(object):
  
 
 
-    def maximization(self, reads, mutations, W, verbal=False):
+    def maximization(self, reads, mutations, W):
         
         accessoryFunctions.maximizeP(self.p, W)
         
         if self.dynamicprior:
-            self.updateDynamicPrior( reads.shape[0], verbal=verbal )
+            self.updateDynamicPrior(reads.shape[0])
             
             
         accessoryFunctions.maximizeMu(self.mu, W, reads, mutations, 
@@ -475,7 +468,7 @@ class BernoulliMixture(object):
     
 
 
-    def updateDynamicPrior(self, numreads, verbal=False):
+    def updateDynamicPrior(self, numreads):
     
         totalweight = self.dynamic_weight*numreads*self.p.reshape((-1,1))
         self.priorA = totalweight*self.dynamic_baserate+1
@@ -666,7 +659,7 @@ class BernoulliMixture(object):
 
 
     def alignModel(self, BM2):
-        """Align some BM2 of same dimension to current BM
+        """Align BM2 to current BM
         Alignment is done to minimize RMS difference between Mus
         
         returns idx, rmsdiff
@@ -820,7 +813,7 @@ class BernoulliMixture(object):
 
     def readModelFromFile(self, fname):
         """Read in BM model from file"""
-            
+        
 
         with open(fname) as inp:
             # pop off p header
@@ -830,7 +823,11 @@ class BernoulliMixture(object):
             
             # pop off p error
             inp.readline()
-            inp.readline()
+            spl = inp.readline().split()
+            if self.pdim > 1:
+                self.p_err = np.array(spl, dtype=float)
+            else:
+                self.p_err = np.array([0])
 
             # pop off mu header
             inp.readline()
@@ -839,6 +836,7 @@ class BernoulliMixture(object):
             actives = []
             inactives = []
             mu = []
+            mu_err = []
             idxmap = []
             
             i = -1
@@ -855,26 +853,30 @@ class BernoulliMixture(object):
 
                 try:
                     vals = map(float, spl[1:1+self.pdim])
-                    
+                    errs = map(float, spl[2+self.pdim:2+2*self.pdim])
+
                     # invalid nt
                     if vals[0] != vals[0]:
-                        mu.append([-999]*self.pdim)
+                        mu.append([np.nan]*self.pdim)
+                        mu_err.append([-1]*self.pdim)
                         continue # skip to next position so not added to inactive/active list
                     else:
                         mu.append(vals)
+                        mu_err.append(errs)
                 
                 except ValueError as e:
-                    if spl[1] == '--':
+                    if spl[1] == '--' or spl[2+self.pdim] == '--':
                         mu.append([-1]*self.pdim)
+                        mu_err.append([-1]*self.pdim)
                     else:
                         raise e
                 
+
                 if spl[-1] == 'i':
                     inactives.append(i)
                 else:
                     actives.append(i)
 
- 
 
             self.idxmap = np.array(idxmap)
             self.active_columns = np.array(actives, dtype=np.int32)
@@ -882,9 +884,10 @@ class BernoulliMixture(object):
 
             mu = np.array(mu)
             self.mu = np.array(mu.transpose(), order='C')
-
             self.mudim = self.mu.shape[1]
             
+            self.mu_err = np.array(mu_err).transpose()
+
             # read in initial p
             inp.readline()
             self.p_initial = np.array(inp.readline().split(), dtype=float)
@@ -906,6 +909,8 @@ class BernoulliMixture(object):
 
                 self.mu_initial[:, i] = map(float, spl[1:])
             
+            return
+
             # read in priorA
             inp.readline()
             priorA = []
@@ -927,12 +932,13 @@ class BernoulliMixture(object):
         EM is used to find optimal inactive mu, keeing p and active mus fixed
         """
         
-        if self.inactive_columns is None or len(self.inactive_columns)==0:
+        if len(self.inactive_columns)==0:
             return
 
 
        
         combined_columns = np.append(self.active_columns, self.inactive_columns)
+        combined_columns.sort()
 
         # get initial posterior probabilities (uses only active columns)
         W = self.computePosteriorProb(reads, mutations)
@@ -958,6 +964,11 @@ class BernoulliMixture(object):
             nsteps+=1
 
         
+        if not converged:
+            print('WARNING: Inactive parameter imputation not converged!!!')
+            return
+
+
         # update newp so that we can track implied population shift
         newp = np.copy(self.p)
         accessoryFunctions.maximizeP(newp, W) 
@@ -965,7 +976,7 @@ class BernoulliMixture(object):
         print('Inactive parameters converged in {0} steps'.format(nsteps))
         print('\tPopulation computed using active+inactive = {0}'.format(newp))
         print('\tPopulation computed using only active     = {0}'.format(self.p))
-        print('\t(active-only populations are used)')
+        print('\t(the active-only populations are used)')
         
         if np.max(np.abs(newp - self.p)) > 0.01:
             print('WARNING: Imputed inactive parameters imply signification population shift')
@@ -973,6 +984,7 @@ class BernoulliMixture(object):
 
         
         self.imputed = True
+
 
 
 
@@ -988,9 +1000,6 @@ class BernoulliMixture(object):
         self.converged = False
         self.BIC = None
         
-        # we always want to suppress verbal for refitting -- confusing!
-        #if 'verbal' in kwargs:
-        #    del kwargs['verbal']
         self.fitEM(reads, mutations, **kwargs)
         
         

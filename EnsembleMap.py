@@ -3,7 +3,7 @@ import numpy as np
 import sys, argparse
 
 import accessoryFunctions
-from BernoulliMixture import *
+from BernoulliMixture import BernoulliMixture
 
 
 
@@ -63,7 +63,7 @@ class EnsembleMap(object):
             self.readPrimaryData(modfile, **kwargs)
         
         # if provided, now update profile.backprofile with rate computed 
-        # using reads filtered according to same criterai for primary data
+        # using reads filtered according to same criteria for primary data
         if untfile is not None:
             self.computeBGprofile(untfile, **kwargs)
 
@@ -135,11 +135,15 @@ class EnsembleMap(object):
             self.profile = ReactivityProfile()
         elif verbal:
             print('Overwriting bgrate from values computed from the raw mutation file {}'.format(untfilename))
-
+        
 
         self.profile.backprofile = bgrate
-        self.profile.normalize(DMS=True)
-
+        
+        # reset rawprofile as well
+        with np.errstate(divide='ignore',invalid='ignore'):
+            self.profile.rawprofile = np.sum(self.mutations, axis=0)/np.sum(self.reads, axis=0)
+            self.backgroundSubtract(normalize=False)
+            
  
 
 
@@ -148,8 +152,6 @@ class EnsembleMap(object):
         """Apply quality filters to eliminate noisy nts from EM fitting
         invalidcols = list of columns to set to invalid
         invalidrate = columns with rates below this value are set to invalid
-        minrx       = minimum signal (react. rate)
-        bgarray     = array (or txt file of array) of background signal
         maxbg       = maximum allowable background signal
         minrxbg     = minimum signal above background
         verbal      = keyword to control printing of inactive nts
@@ -180,7 +182,7 @@ class EnsembleMap(object):
         signal = np.sum(self.mutations, axis=0, dtype=np.float)
         
         lowsignal = []         
-        for i in np.where(signal < invalidrate*self.mutations.shape[0])[0]:
+        for i in np.where(signal < invalidrate*self.numreads)[0]:
             if i not in invalidcols:
                 lowsignal.append(i)
                 invalidcols.append(i)
@@ -214,8 +216,7 @@ class EnsembleMap(object):
         if self.profile is not None:
             
             with np.errstate(divide='ignore',invalid='ignore'):
-                diff = self.profile.rawprofile - self.profile.backprofile
-                inactive = (diff < minrxbg)
+                inactive = (self.profile.subprofile < minrxbg)
             
             # invalid columns are distinct from inactive
             inactive[self.invalid_columns] = False
@@ -281,7 +282,7 @@ class EnsembleMap(object):
             indices = np.arange(self.seqlen)
             
             mask = np.isin(indices, self.active_columns, invert=True)
-            mask = mask | np.isin(indices, self.invalid_columns, invert=True)
+            mask = mask & np.isin(indices, self.invalid_columns, invert=True)
 
             self.inactive_columns = np.array(indices[mask])
         
@@ -296,7 +297,7 @@ class EnsembleMap(object):
             indices = np.arange(self.seqlen)
             
             mask = np.isin(indices, self.inactive_columns, invert=True)
-            mask = mask | np.isin(indices, self.invalid_columns, invert=True)
+            mask = mask & np.isin(indices, self.invalid_columns, invert=True)
 
             self.active_columns = np.array(indices[mask])
  
@@ -434,7 +435,8 @@ class EnsembleMap(object):
                     bestfitcount += 1
                     if BM.BIC < compareBM.BIC:
                         bestfit = BM
-
+                
+                # solution is different and better
                 elif BM.BIC < compareBM.BIC:
                     bestfitcount = 1
                     bestfit = BM
@@ -458,7 +460,7 @@ class EnsembleMap(object):
                 badcolumns[bc] = 0
 
 
-
+        # END of while loop
 
         if bestfitcount == soln_termcount and verbal:
             print('{0} identical fits found. Terminating trials'.format(bestfitcount))
@@ -477,7 +479,8 @@ class EnsembleMap(object):
     
     def compareBMs(self, BMnew, BMold, verbal=False):
         """Check if BMnew and BMold have the same set of active_columns
-        If not, refit BMold and return
+        If not, refit BMold
+        returns BMold that can be compared
         """
 
         # check if BMold has the same active_columns
@@ -514,8 +517,6 @@ class EnsembleMap(object):
             return None
         
         
-        #print('\tRefit best {0}-component model, BIC={1:.1f}'.format(compareBM.pdim, compareBM.BIC))
-
 
         # check that new solution hasn't changed too much
         pdiff, mudiff = BMold.modelDifference(compareBM, func=np.max)
@@ -564,7 +565,7 @@ class EnsembleMap(object):
 
 
         # iterate through each model size
-        for c in xrange(2,maxcomponents+1):
+        for c in xrange(2, maxcomponents+1):
             
             if verbal: print('\nAdvancing to {}-component model\n'.format(c))
 
@@ -574,8 +575,7 @@ class EnsembleMap(object):
 
             # terminate if no valid solution found             
             if bestBM is None:
-                if verbal:
-                    print("No valid solution for {0}-component model".format(c))
+                if verbal:  print("No valid solution for {0}-component model".format(c))
                 break
              
             elif verbal:
@@ -604,6 +604,7 @@ class EnsembleMap(object):
                     print("{0}-component model assigned as new best model!".format(c))
                     
             
+        # End for loop
 
         if verbal:
             print('{0}-component model selected'.format(overallBestBM.pdim))
@@ -659,6 +660,8 @@ class EnsembleMap(object):
         maxProfile.rawprofile = np.max(model.mu, axis=0)
         maxProfile.backgroundSubtract()
         normfactors = maxProfile.normalize(DMS=True)
+
+######## confirm that normalization is being done correctly !
 
         # now create new normalized profiles
         profiles = []
@@ -750,40 +753,9 @@ class EnsembleMap(object):
         
 
 
-
-    def computeRINGs(self, modelnum, window=1, maxreads=-1, corrtype='apc', verbal=True):
-        """For the specified modelnum of BMsoluton, sample reads stochasticaly
-        return RINGexperiment"""
-        
-        ring = RINGexperiment(arraysize = self.seqlen,
-                              corrtype = corrtype,
-                              verbal = verbal)
-
-        ring.sequence = self.sequence
-
-        
-        read  = np.zeros( (self.seqlen, self.seqlen), dtype=np.int32)
-        comut = np.zeros( (self.seqlen, self.seqlen), dtype=np.int32)
-        inotj = np.zeros( (self.seqlen, self.seqlen), dtype=np.int32)
-        
-        weights = self.BMsolution.computePosteriorProb(self.reads, self.mutations)
-        
-        nsel = accessoryFunctions.fillRINGMatrix(read, comut, inotj, 
-                                                 self.reads, self.mutations, 
-                                                 weights[modelnum, :], maxreads, window) 
-        ring.window = window
-        ring.ex_readarr = read
-        ring.ex_comutarr = comut
-        ring.ex_inotjarr = inotj
-        
-        print('{0} reads selected for RING analysis for component {1}'.format(nsel, modelnum))
-
-        return ring
-
  
 
-    def computeRINGs2(self, window=1, maxreads=-1, corrtype='apc', 
-                      bgfile=None, verbal=True, **bgfileargs):
+    def computeRINGs2(self, window=1, maxreads=-1, corrtype='apc', bgfile=None, verbal=True):
         """Sample reads stochastically and return RINGexperiment objects for each model"""
         
         # setup the activestatus mask
@@ -820,7 +792,8 @@ class EnsembleMap(object):
     
             if bgfile is not None:
                 if p==0:
-                    ring.initDataMatrices('bg', bgfile, window=window, verbal=verbal, **bgfileargs)
+                    ring.initDataMatrices('bg', bgfile, window=window, 
+                                          mincoverage=self.minreadcoverage, verbal=verbal)
                 else:
                     ring.bg_readarr = relist[0].bg_readarr
                     ring.bg_comutarr = relist[0].bg_comutarr
@@ -856,7 +829,7 @@ def parseArguments():
     
     quality = parser.add_argument_group('quality filtering options')
     quality.add_argument('--mincoverage', type=int, help='Minimum coverage (integer number of nts) required for read to be included in cacluations')
-    quality.add_argument('--minrxbg', type=float, default=0.002, help='Set nts with rx-bg less than this to inactive')
+    quality.add_argument('--minrxbg', type=float, default=0.002, help='Set nts with rx-bg less than this to inactive (default=0.002)')
     quality.add_argument('--undersample', type=int, default=-1, help='Only cluster with this number of reads. By default this option is disabled and all reads are used (default=-1).')
     
 
@@ -870,24 +843,24 @@ def parseArguments():
     fitopt.add_argument('--badcol_cutoff', type=int, default=5, help='Inactivate column after it causes a failure X number of times *after* a valid soln has already been found (default=5)')
     fitopt.add_argument('--writeintermediates', action='store_true', help='Write each BM solution to file with specified prefix. Will be saved as prefix-intermediate-[component]-[trial].bm')
 
-    fitopt.add_argument('--priorWeight', type=float, default=0.01, help='Relative weight of dynamic prior on Mu (default=0.1). Dynamic prior method is disabled by passing -1, upon which a static naive prior is used. Valid weights are <0 and <1. Default = 0.01 (dynamic method enabled).')
+    fitopt.add_argument('--priorWeight', type=float, default=0.01, help='Relative weight of dynamic prior on Mu (default=0.1). Dynamic prior method is disabled by passing -1, upon which a static naive prior is used. Valid weights are within the (0,1) interval. Default = 0.01 (dynamic method enabled).')
 
 
     ############################################################
     # RING options
     
     ringopt = parser.add_argument_group('options for performing RING analysis on clustered reads')
-    ringopt.add_argument('--oldring', action='store_true')
     ringopt.add_argument('--ring', action='store_true')
-    ringopt.add_argument('--untreated_parsed', help='Path to modified parsed.mut file')
     ringopt.add_argument('--window', type=int, default=1, help='Window size for computing correlations (default=1)')
 
-    ringopt.add_argument('--pairmap', action='store_true') 
+    ringopt.add_argument('--pairmap', action='store_true', help='Run PAIR-MaP analysis on clustered reads') 
 
 
     ############################################################
     # Other options
     
+    optional.add_argument('--untreated_parsed', help='Path to modified parsed.mut file')
+
     optional.add_argument('--readfromfile', type=str, help='Read in model from BM file')
     optional.add_argument('--suppressverbal', action='store_false', help='Suppress verbal output')
     optional.add_argument('--outputprefix', type=str, default='emfit', help='Write output files with this prefix (default=emfit)')
@@ -965,26 +938,11 @@ if __name__=='__main__':
 
         EM.readModelFromFile(args.readfromfile)
 
-    
-    if args.oldring:
-        
-        for c in range(EM.BMsolution.pdim):
 
-            ringexp = EM.computeRINGs(c, window=args.window, verbal=args.suppressverbal)
-        
-            if args.untreated_parsed is not None:
-                ringexp.initDataMatrices('bg', args.untreated_parsed, mincoverage=args.mincoverage,
-                                         window=args.window, verbal=args.suppressverbal)
-            
-            ringexp.computeCorrelationMatrix(verbal=args.suppressverbal)
-                                         
-            ringexp.writeCorrelations('{0}-{1}-rings.txt'.format(args.outputprefix, c))
-
-    
     if args.ring:
 
         relist = EM.computeRINGs2(window=args.window, verbal=args.suppressverbal,
-                                  bgfile=args.untreated_parsed, mincoverage=args.mincoverage)
+                                  bgfile=args.untreated_parsed)
 
         for i,model in enumerate(relist):
             model.computeCorrelationMatrix(verbal=args.suppressverbal)
@@ -997,7 +955,7 @@ if __name__=='__main__':
         profiles = EM.computeNormalizedReactivities()
 
         relist = EM.computeRINGs2(window=3, verbal=args.suppressverbal, 
-                                  bgfile=args.untreated_parsed, mincoverage=args.mincoverage)
+                                  bgfile=args.untreated_parsed)
         
 
         for i,model in enumerate(relist):

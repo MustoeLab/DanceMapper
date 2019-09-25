@@ -11,9 +11,6 @@ from ReactivityProfile import ReactivityProfile
 
 
 class SynBernoulliMixture():
-    """Class for synthetic Bernoulli Mixture dataset
-    Inherits generic BernoulliMixture
-    """
 
     def __init__(self, p=None, mu=None):
         """p is 1D array with population of each model
@@ -97,15 +94,16 @@ class SynBernoulliMixture():
         for i in xrange(num_models):
             
             # create mask of items to select
-            mask = np.ones(muts.shape, dtype=bool)
+            mask = np.zeros(muts.shape, dtype=bool)
 
-            # only select rows with desired assignment
-            mask[(assignments != i),] = False
-
-            # generate random matrix; deselect positions no meeting cutoff
-            mask[np.random.random(muts.shape) > self.mu[i,:]] = False
+            # set mask based on reactivity, for now treating all 
+            # reads as belonging to model i
+            mask[np.random.random(muts.shape) <= self.mu[i,:]] = True
             
-            # positions that remain True in mask are mutated
+            # deselect rows that aren't from model i 
+            mask[(assignments != i),] = False
+            
+            # set muts
             muts[mask] = 1
         
 
@@ -113,7 +111,7 @@ class SynBernoulliMixture():
         reads = np.ones((num_reads, seqlen), dtype=np.int8)
         
         # zero out data
-        mask = np.random.random(reads.shape) < nodata_rate
+        mask = np.random.random(reads.shape) <= nodata_rate
         reads[mask] = 0
         muts[mask] = 0
         
@@ -139,8 +137,7 @@ class SynBernoulliMixture():
         
         if self.bgrate is not None:
             EM.profile.backprofile = self.bgrate
-            # normalize with DMS false because we don't have sequence info 
-            # (and it doesn't matter anyways)
+            # normalize with DMS false because we don't have sequence info (it doesn't matter anyways)
             EM.profile.backgroundSubtract(normalize=True, DMS=False) 
 
 

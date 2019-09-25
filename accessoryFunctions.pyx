@@ -44,10 +44,9 @@ def fillReadMatrices(str inputFile, int seqlen, int mincoverage, int undersample
     cdef int linenum = -1
     cdef int skipped_reads = 0
     cdef int skipped_coverage = 0
-    cdef float t1
 
     # iterate through lines
-    while True and linenum<1e12:
+    while True and linenum<1e9:
         
         linenum += 1 
         
@@ -100,10 +99,8 @@ def fillReadMatrices(str inputFile, int seqlen, int mincoverage, int undersample
 
             # this is not optimized, but should work for now
             idx = np.random.choice(linenum, undersample, replace=False)
-            print(time.time())
             allreadstr = [allreadstr[i] for i in idx]
             allmutstr = [allmutstr[i] for i in idx]
-            print(time.time())
 
     return np.array(allreadstr, dtype=np.int8), np.array(allmutstr, dtype=np.int8)
 
@@ -154,7 +151,7 @@ def compute1Dprofile(str inputFile, int seqlen, int mincoverage):
     cdef int linenum = -1
     
     # iterate through lines
-    while True and linenum<1e12:
+    while True and linenum<1e9:
         
         linenum += 1 
         
@@ -308,61 +305,6 @@ def maximizeMu(double[:,::1] mu, double[:,::1] readWeights,
 ##################################################################################
 
 
-def fillRINGMatrix(int[:,::1] read_arr, int[:,::1] comut_arr, int[:,::1] inotj_arr,
-                   char[:,::1] reads, char[:,::1] mutations, double[:] weights, 
-                   int maxreads, int window):
-    
-
-    # handle 'no limit' on maxreads
-    if maxreads < 0:
-        maxreads = reads.shape[0]
-
-
-    cdef int i, j, n, idx
-
-    # initialize read/mut arrays that are filled by fillReadMut
-    cdef int[:] f_read = np.zeros( reads.shape[1]+1, dtype=np.intc)
-    cdef int[:] f_mut = np.zeros( reads.shape[1]+1, dtype=np.intc)
-
-    # initialize the READ object which we'll send to fillReadMut
-    cdef READ R
-    R.start = 0
-    R.stop = reads.shape[1] - 1
-    R.subcode = 0
-    
-
-    # quick but memory inefficent way to generate random numbers
-    cdef int[:] readindices = np.where(np.random.random(weights.shape[0])<=weights)[0].astype(np.intc)
-    
-
-    # subsample if exceeds maxreads
-    if maxreads>0 and len(readindices) > maxreads:
-        readindices = np.random.choice(readindices, maxreads, replace=False)
-    
-
-    for n in xrange(len(readindices)):
-        
-        idx = readindices[n]
-
-        # update the read/muts struct to point to current read
-        R.read = &reads[idx,0]
-        R.muts = &mutations[idx,0]
-        
-        # fill f_read and f_mut, with mincoverage=0 since reads have already been filtered
-        fillReadMut(f_read, f_mut, R, window, 0)
-        
-        # increment read_arr, comut_arr, inotj_arr
-        incrementArrays(read_arr, comut_arr, inotj_arr, f_read, f_mut)
-
-
-    return len(readindices)
-
-
-
-
-
-
-
 def fillRINGMatrix2(int[:,:,::1] read_arr, int[:,:,::1] comut_arr, int[:,:,::1] inotj_arr,
                     char[:,::1] reads, char[:,::1] mutations, char[:] activestatus,
                     double[:,::1] mu, double[:] p, int maxreads, int window): 
@@ -383,12 +325,14 @@ def fillRINGMatrix2(int[:,:,::1] read_arr, int[:,:,::1] comut_arr, int[:,:,::1] 
     # compute logmu and clogmu
     cdef double[:,::1] logmu = np.zeros((mu.shape[0], mu.shape[1]))
     cdef double[:,::1] clogmu = np.zeros((mu.shape[0], mu.shape[1]))
+    
     for i in xrange(pdim):
         for j in xrange(mu.shape[1]):
-            if mu[i,j] > 0:
+            if mu[i,j] > 0: # since we are going over all cols (not just active) need to check
                 logmu[i,j] = log( mu[i,j] )
                 clogmu[i,j] = log( 1-mu[i,j] )
     
+
     # declare other needed containers
     cdef double[:] loglike = np.empty(pdim) # container for read loglike of each model
     cdef double[:] ll_i = np.empty(pdim) # continer for loglike subtracting i
@@ -579,8 +523,6 @@ def computeInformationMatrix(double[:] p, double[:,::1] mu, double[:,::1] readWe
     cdef double value
     cdef double curweight
     
-    cdef long counter = 0
-
     # iterate over all reads
     for i in xrange(reads.shape[0]):
         
