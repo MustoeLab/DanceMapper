@@ -62,27 +62,34 @@ class ConvergenceMonitor(object):
     def update(self, p, mu):
         
         self.step += 1
-
-        if self.step < self.initsteps:
-            self.checkConvergence(p,mu)
-
-        elif self.step > self.maxsteps:
+        
+        if self.step > self.maxsteps:
             self.error = ConvergenceError('Maximum iterations exceeded', self.step)
             self.iterate = False
+            return
         
-        else:
+        # check convergence
+        self.checkConvergence(p,mu)
+        
+
+        if self.step >= self.initsteps or self.converged:
             try:
                 self.checkParamBounds(p, mu)
                 self.checkMuRatio(mu)
                 self.checkDegenerate(mu)
-                self.checkConvergence(p, mu)
+
+                if self.converged: # only do this check if converged
+                    self.artifactCheck(mu)
 
             except ConvergenceError as e:
                 self.error = e
                 self.iterate = False
+                self.converged = False
 
-
+                    
         
+
+
     def checkConvergence(self, p, mu):
         """Compare new params to prior params.
         If within tolerance, set converged to True
@@ -100,7 +107,6 @@ class ConvergenceMonitor(object):
         mdiff = np.abs(activemu - self.lastmu) 
        
         if max(np.max(pdiff), np.max(mdiff)) < self.convergeThresh:
-            self.artifactCheck(mu)
             self.converged = True
             self.iterate = False
         
@@ -175,13 +181,20 @@ class ConvergenceMonitor(object):
         self.rms = rmsdiff
         self.rmshistory.append(change)
         
-        # look at trend over last 50 steps
+        # look at trend over last 50 steps; if rmshistory is getting smaller
+        # and rms is low, converging to degenerate soln...
         if len(self.rmshistory) > 50:
             self.rmshistory.popleft()
-
+    
             if rmsdiff < 0.005 and np.sum(self.rmshistory)<0:
                 raise ConvergenceError('Degenerate Mu: RMS diff={0:.4f}'.format(rmsdiff), self.step)
+        
+        # also do final check if converged
+        elif self.converged and rmsdiff < 0.005:
+            raise ConvergenceError('Degenerate Mu: RMS diff={0:.4f}'.format(rmsdiff), 'END')
 
+
+            
 
 
     def artifactCheck(self, mu):
@@ -431,7 +444,7 @@ class BernoulliMixture(object):
         
         self.converged = True
         
-        self.computeModelLikelihood(reads, mutations)
+        self.loglike, self.BIC = self.computeModelLikelihood(reads, mutations)
         
 
 
@@ -543,7 +556,7 @@ class BernoulliMixture(object):
 
         # compute loglike and BIC        
         if self.converged:
-            self.computeModelLikelihood(reads, mutations)
+            self.loglike, self.BIC = self.computeModelLikelihood(reads, mutations)
 
         # print outcome
         if verbal:
@@ -562,32 +575,35 @@ class BernoulliMixture(object):
             
     
     
-    def computeModelLikelihood(self, reads, mutations):
+    def computeModelLikelihood(self, reads, mutations, active_columns=None):
         """Compute the (natural) log-likelihood of the data given the BM model
-             --> assigns self.loglike 
-        Compute the BIC of the model
-             --> assigns self.BIC
+        and compute the BIC of the model
+        
+        if active_colums=None, use self.active_columns
 
         returns loglike, BIC
         """
+        
+        if active_columns is None:
+            active_columns = self.active_columns
 
         llmat = np.zeros((self.pdim, reads.shape[0]), dtype=np.float64)
         
-        accessoryFunctions.loglikelihoodmatrix(llmat, reads, mutations, self.active_columns, self.mu, self.p)
+        accessoryFunctions.loglikelihoodmatrix(llmat, reads, mutations, active_columns, self.mu, self.p)
         
         # determine the likelihood of each read by summing over components
         readl = np.sum(np.exp(llmat), axis=0) 
     
         # total log-likelihood --> the product of individual read likelihoods
-        self.loglike = np.sum( np.log( readl ) )
+        loglike = np.sum( np.log( readl ) )
 
         # number of parameters
         npar = len(self.active_columns)*self.pdim + self.pdim-1
         
         # BIC = -2*ln(LL) + npar*ln(n)
-        self.BIC = -2*self.loglike + npar*np.log(reads.shape[0])
+        BIC = -2*loglike + npar*np.log(reads.shape[0])
 
-        return self.loglike, self.BIC
+        return loglike, BIC
 
    
 
@@ -976,7 +992,7 @@ class BernoulliMixture(object):
         print('Inactive parameters converged in {0} steps'.format(nsteps))
         print('\tPopulation computed using active+inactive = {0}'.format(newp))
         print('\tPopulation computed using only active     = {0}'.format(self.p))
-        print('\t(the active-only populations are used)')
+        print('\t\t(the active-only populations are used)')
         
         if np.max(np.abs(newp - self.p)) > 0.01:
             print('WARNING: Imputed inactive parameters imply signification population shift')
@@ -987,25 +1003,79 @@ class BernoulliMixture(object):
 
 
 
-
-    def refit_new_active(self, reads, mutations, **kwargs):
-        """Refit a coverged BM with different active_columns
-        Use prior converged p/mu parameters as a starting point
+    def model_rms_diff(self, excludepercentile=None):
+        """Return the minimum root-mean-square between model components
+        excludepercentile will exclude the top indicated percentile from the calculation
         """
-        
-        # set initial params to prior guess
-        self.p_initial = np.copy(self.p)
-        self.mu_initial = np.copy(self.mu)
-        
-        self.converged = False
-        self.BIC = None
-        
-        self.fitEM(reads, mutations, **kwargs)
-        
-        
 
+        minval = 1e5
+        
+        for i,j in itertools.combinations(range(self.pdim), 2):
+            
+            diff = np.square(self.mu[i]-self.mu[j])
+            diff = diff[self.active_columns]
+            
+            if excludepercentile is not None:
+                exvalue = np.percentile(diff, excludepercentile)
+                rms = np.sqrt(np.mean( diff[diff<=exvalue] ))
+            
+            else:
+                rms = np.sqrt(np.mean( diff ))
+
+            if rms < minval:
+                minval = rms
+
+        return minval
 
     
+    def model_absmean_diff(self, excludepercentile=None):
+        """Return the minimum abs mean between model components
+        excludepercentile will exclude the top indicated percentile from the calculation
+        """
+
+        minval = 1e5
+        
+        for i,j in itertools.combinations(range(self.pdim), 2):
+            
+            diff = np.abs(self.mu[i]-self.mu[j])
+            diff = diff[self.active_columns]
+            
+            if excludepercentile is not None:
+                exvalue = np.percentile(diff, excludepercentile)
+                m = np.mean( diff[diff<=exvalue] )
+            
+            else:
+                m = np.mean( diff )
+
+            if m < minval:
+                minval = m
+
+        return minval
+
+
+    def model_num_diff(self, diff_cutoff=0.01):
+        """Return the minimum number of different mus between model components
+        """
+
+        minval = 1e5
+        
+        for i,j in itertools.combinations(range(self.pdim), 2):
+            
+            diff = np.abs(self.mu[i]-self.mu[j])
+            diff = diff[self.active_columns] > diff_cutoff
+                
+            s = np.sum(diff)     
+
+            if s < minval:
+                minval = s
+
+        return minval
+
+
+
+
+
+
 
 
 

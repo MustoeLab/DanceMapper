@@ -141,8 +141,8 @@ class EnsembleMap(object):
         
         # reset rawprofile as well
         with np.errstate(divide='ignore',invalid='ignore'):
-            self.profile.rawprofile = np.sum(self.mutations, axis=0)/np.sum(self.reads, axis=0)
-            self.backgroundSubtract(normalize=False)
+            self.profile.rawprofile = np.sum(self.mutations, axis=0, dtype=float)/np.sum(self.reads, axis=0)
+            self.profile.backgroundSubtract(normalize=False)
             
  
 
@@ -419,25 +419,19 @@ class EnsembleMap(object):
                     continue
                 
                 
-                # this func will refit best fit BM if columns aren't equal
-                compareBM = self.compareBMs(BM, bestfit, verbal=verbal)
+                bestfitBIC = self.compareBIC(BM, bestfit, verbal=verbal)
                 
-                # if bestfit couldn't be refit, then this suggests prior soln is unstable
-                # Assign new solution as bestfit
-                if compareBM is None:
-                    bestfit = BM
-                    continue
-                
-
-                pdiff, mudiff = BM.modelDifference(compareBM, func=np.max)
+                # doesn't matter if active_columns are different; diff computed
+                # using the smallest list
+                pdiff, mudiff = BM.modelDifference(bestfit, func=np.max)
 
                 if pdiff < 0.01 and mudiff < 0.01:
                     bestfitcount += 1
-                    if BM.BIC < compareBM.BIC:
+                    if BM.BIC < bestfitBIC:
                         bestfit = BM
                 
                 # solution is different and better
-                elif BM.BIC < compareBM.BIC:
+                elif BM.BIC < bestfitBIC:
                     bestfitcount = 1
                     bestfit = BM
                 
@@ -477,59 +471,23 @@ class EnsembleMap(object):
 
 
     
-    def compareBMs(self, BMnew, BMold, verbal=False):
-        """Check if BMnew and BMold have the same set of active_columns
-        If not, refit BMold
-        returns BMold that can be compared
-        """
+    def compareBIC(self, BMnew, BMold, verbal=False):
+        """Return BIC of BMold computed using the same set of active_columns as BMnew"""
 
         # check if BMold has the same active_columns
         if np.array_equal(BMnew.active_columns, BMold.active_columns):
-            return BMold
-        
-
-        # check if we have previously reft
-        if hasattr(BMold, 'alternativesolns'):
-            for soln in BMold.alternativesolns:
-                if np.array_equal(BMnew.active_columns, soln.active_columns):
-                    print('Using previous best refit')
-                    return soln
+            return BMold.BIC
         
 
         # if we get here then we need to refit
         if verbal:  
             print('\tRefitting prior {0}-component model with different inactive columns'.format(BMold.pdim))
         
-
-        compareBM = BMold.copy()
         
-        # make sure we aren't copying over alternativesolns
-        try:
-            del compareBM.alternativesolns
-        except AttributeError:
-            pass
+        ll,bic = BMold.computeModelLikelihood(self.reads, self.mutations, 
+                                              active_columns=BMnew.active_columns)
 
-        compareBM.set_active_columns(BMnew.active_columns)
-        compareBM.refit_new_active(self.reads, self.mutations, verbal=verbal)
-                    
-        if not compareBM.converged:
-            if verbal: print('\t{0}-component model could not be refit!'.format(BMold.pdim))
-            return None
-        
-        
-
-        # check that new solution hasn't changed too much
-        pdiff, mudiff = BMold.modelDifference(compareBM, func=np.max)
-        if pdiff > 0.005 or mudiff > 0.01:
-            if verbal: print('\tWARNING! Significant dP={0:.3f} or dMu={1:.3f} after refitting!'.format(pdiff, mudiff))
-
-        if hasattr(BMold, 'alternativesolns'):
-            BMold.alternativesolns.append(compareBM)
-        else:
-            setattr(BMold, 'alternativesolns', [compareBM])
-
-
-        return compareBM
+        return bic
 
                 
 
@@ -582,17 +540,12 @@ class EnsembleMap(object):
                 self.printEMFitSummary(bestBM, fitlist)
              
 
-            compareBM = self.compareBMs(bestBM, overallBestBM, verbal=verbal)
+            priorBIC = self.compareBIC(bestBM, overallBestBM, verbal=verbal)
 
-            if compareBM is None:
-                print("{0}-component model did not converge under new inactive list\nUnable to perform necessary {0} vs. {1} component comparison. Selecting prior {0}-component model.".format(c-1, c))
-                break
-            
-
-            deltaBIC = bestBM.BIC-compareBM.BIC
+            deltaBIC = bestBM.BIC-priorBIC
             
             if verbal:
-                print("{0}-component model BIC={1:.1f} ==> dBIC={2:.1f}".format(c-1, compareBM.BIC, deltaBIC))
+                print("{0}-component model BIC={1:.1f} ==> dBIC={2:.1f}".format(c-1, priorBIC, deltaBIC))
 
 
             # if BIC is not better, terminate search
@@ -608,19 +561,22 @@ class EnsembleMap(object):
 
         if verbal:
             print('{0}-component model selected'.format(overallBestBM.pdim))
-    
         
+
         # reset the active/inactive cols if necessary
         self.setColumns(activecols=overallBestBM.active_columns, 
                         inactivecols=overallBestBM.inactive_columns)    
         
         overallBestBM.imputeInactiveParams(self.reads, self.mutations)
-        
+
         self.BMsolution = overallBestBM
+
+        self.qualityCheck()
+
 
         return self.BMsolution
 
-
+    
 
 
     def printEMFitSummary(self, bestfit, fitlist):
@@ -644,8 +600,56 @@ class EnsembleMap(object):
         print('*'*65+'\n')
  
 
-
     
+    def qualityCheck(self):
+        """Check that model is well defined"""
+
+        rms = self.BMsolution.model_rms_diff()
+        absmean = self.BMsolution.model_absmean_diff()
+        ndiff = self.BMsolution.model_num_diff()
+        p_err = max(self.BMsolution.p_err)
+       
+        count = 0
+    
+        print('\n-----------------------------------------')
+        print('Quality checks:')
+        
+        if rms > 0.01:
+            print('Min Mu RMS Diff = {0:.3f}    PASSED'.format(rms))
+        else:
+            print('Min Mu RMS Diff = {0:.3f}    FAILED'.format(rms))
+            count += 1
+
+        if absmean > 0.01:
+            print('Min Mu Mean Diff = {0:.3f}   PASSED'.format(absmean))
+        else:
+            print('Min Mu Mean Diff = {0:.3f}   FAILED'.format(absmean))
+            count += 1
+
+        if ndiff > 20:
+            print('Min # Diff Mu = {}         PASSED'.format(ndiff))
+        else:
+            print('Min # Diff Mu = {}         FAILED'.format(ndiff))
+            count += 1
+
+
+        if p_err < 0.01:
+            print('Max P error = {0:.3f}        PASSED'.format(p_err))
+        else:
+            print('Max P error = {0:.3f}        FAILED'.format(p_err))
+            count += 1
+        
+
+        if count == 0:
+            print('\nAll checks PASSED!')
+        else:
+            print('\nWARNING: {}/4 checks FAILED!'.format(count))
+            print('\t\tSolution may be untrustworthy')
+        
+        print('-----------------------------------------')
+       
+
+
 
     def computeNormalizedReactivities(self):
         """From converged mu params and profile, compute normalized params"""
