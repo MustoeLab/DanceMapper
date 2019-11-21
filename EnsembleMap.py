@@ -340,7 +340,7 @@ class EnsembleMap(object):
 
 
 
-    def fitEM(self, components, trials=5, soln_termcount=3, badcolcount0=3, badcolcount=5, 
+    def fitEM(self, components, trials=5, soln_termcount=3, badcolcount0=2, badcolcount=5, 
               priorWeight=-1, verbal=False, writeintermediate=None, **kwargs):
         """Fit Bernoulli Mixture model of a specified number of components.
         Trys a number of random starting conditions. Terminates after finding a 
@@ -396,10 +396,9 @@ class EnsembleMap(object):
                                   inactive_columns=self.inactive_columns, 
                                   idxmap=self.ntindices)
             
-
             # set up the prior
             if priorWeight > 0:
-                BM.setDynamicPriors(priorWeight, self.profile.backprofile)
+                BM.setDynamicPriors(priorWeight, np.sum(self.reads, axis=0), self.profile.backprofile)
 
             # fit the BM
             BM.fitEM(self.reads, self.mutations, verbal=verbal, **kwargs)
@@ -538,7 +537,8 @@ class EnsembleMap(object):
              
             elif verbal:
                 self.printEMFitSummary(bestBM, fitlist)
-             
+                self.qualityCheck(bestBM)
+
 
             priorBIC = self.compareBIC(bestBM, overallBestBM, verbal=verbal)
 
@@ -601,13 +601,19 @@ class EnsembleMap(object):
  
 
     
-    def qualityCheck(self):
+    def qualityCheck(self, bm=None):
         """Check that model is well defined"""
+        
+        if bm is None:
+            bm = self.BMsolution
 
-        rms = self.BMsolution.model_rms_diff()
-        absmean = self.BMsolution.model_absmean_diff()
-        ndiff = self.BMsolution.model_num_diff()
-        p_err = max(self.BMsolution.p_err)
+        if len(bm.p) == 1:
+            return
+
+        rms = bm.model_rms_diff()
+        absmean = bm.model_absmean_diff()
+        ndiff = bm.model_num_diff()
+        p_err = max(bm.p_err)
        
         count = 0
     
@@ -843,11 +849,11 @@ def parseArguments():
     fitopt = parser.add_argument_group('options for fitting data')
     fitopt.add_argument('--fit', action='store_true', help='Flag specifying to fit data')
     fitopt.add_argument('--maxcomponents', type=int, default=5, help='Maximum number of components to fit (default=5)')
-    fitopt.add_argument('--trials', type=int, default=10, help='Maximum number of fitting trials at each component number (default=10)')
+    fitopt.add_argument('--trials', type=int, default=20, help='Maximum number of fitting trials at each component number (default=20)')
     fitopt.add_argument('--badcol_cutoff', type=int, default=5, help='Inactivate column after it causes a failure X number of times *after* a valid soln has already been found (default=5)')
     fitopt.add_argument('--writeintermediates', action='store_true', help='Write each BM solution to file with specified prefix. Will be saved as prefix-intermediate-[component]-[trial].bm')
 
-    fitopt.add_argument('--priorWeight', type=float, default=0.01, help='Relative weight of dynamic prior on Mu (default=0.1). Dynamic prior method is disabled by passing -1, upon which a static naive prior is used. Valid weights are within the (0,1) interval. Default = 0.01 (dynamic method enabled).')
+    fitopt.add_argument('--priorWeight', type=float, default=0.001, help='Relative weight of dynamic prior on Mu (default=0.1). Dynamic prior method is disabled by passing -1, upon which a static naive prior is used. Valid weights are within the (0,1) interval. Default = 0.01 (dynamic method enabled).')
 
 
     ############################################################

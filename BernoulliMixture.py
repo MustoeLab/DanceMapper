@@ -42,7 +42,7 @@ class ConvergenceError(Exception):
 class ConvergenceMonitor(object):
     """Object to monitor convergence of EM algorithm"""
 
-    def __init__(self, activecols, convergeThresh=1e-4, maxsteps=1000, initsteps=41):
+    def __init__(self, activecols, convergeThresh=1e-4, maxsteps=1000, initsteps=51):
 
         self.step = 0
         self.lastp = None
@@ -128,12 +128,17 @@ class ConvergenceMonitor(object):
         
         minvals = np.min(activemu, axis=0)
 
-        lowcolumns = self.active_columns[np.where(minvals < 1e-4)]
-
+        lowcolumns = self.active_columns[np.where(minvals < 1e-5)]
 
         if len(lowcolumns)>0:
             raise ConvergenceError('Columns with low Mu', self.step, lowcolumns)
-    
+        
+        maxvals = np.max(activemu, axis=0)
+        hicolumns = self.active_columns[np.where(maxvals > 0.5)]
+        if len(hicolumns)>0:
+            raise ConvergenceError('Columns with hi Mu', self.step, hicolumns)
+        
+
     
 
     def checkMuRatio(self, mu, ratioCutoff=5.3):
@@ -406,7 +411,7 @@ class BernoulliMixture(object):
 
     
 
-    def setDynamicPriors(self, weight, baserate):
+    def setDynamicPriors(self, weight, readdepth, baserate):
 
         if not 0<weight<=1:
             raise ValueError('DynamicPrior weight = {} is invalid, must be 0< <=1'.format(weight))
@@ -414,10 +419,13 @@ class BernoulliMixture(object):
         if baserate.shape[0] != self.mudim:
             raise ValueError('Baserate dimension={0} does not match mudim={1}'.format(baserate.shape[0], self.mudim))
 
-        self.dynamic_weight = weight
-        self.dynamic_baserate = baserate
+        #self.dynamic_weight = weight
+        #self.dynamic_baserate = baserate
+        
+        self.priorA = baserate*readdepth*weight*np.ones((self.pdim, self.mudim))+1
+        self.priorB = np.ones((self.pdim, self.mudim))+1
 
-        self.dynamicprior = True
+        #self.dynamicprior = True
         
 
 
