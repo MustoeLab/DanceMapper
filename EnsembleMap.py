@@ -2,14 +2,15 @@
 import numpy as np
 import sys, argparse
 
-import accessoryFunctions
-from BernoulliMixture import BernoulliMixture
-
-
-
 # get path to functions needed for mutstring I/O
 import ringmapperpath
 sys.path.append(ringmapperpath.path())
+
+
+import accessoryFunctions as aFunc
+from BernoulliMixture import BernoulliMixture
+
+
 
 from ReactivityProfile import ReactivityProfile
 from ringmapper import RINGexperiment
@@ -108,8 +109,8 @@ class EnsembleMap(object):
 
 
         # read in the matrices
-        reads, mutations = accessoryFunctions.fillReadMatrices(modfilename, self.seqlen, 
-                                                               self.minreadcoverage, undersample=undersample)
+        reads, mutations = aFunc.fillReadMatrices(modfilename, self.seqlen, 
+                                                  self.minreadcoverage, undersample=undersample)
         
         print('{} reads for clustering\n'.format(reads.shape[0]))
 
@@ -128,7 +129,7 @@ class EnsembleMap(object):
             raise AttributeError('minreadcoverage not set!')
 
 
-        bgrate, bgdepth = accessoryFunctions.compute1Dprofile(untfilename, self.seqlen, self.minreadcoverage)
+        bgrate, bgdepth = aFunc.compute1Dprofile(untfilename, self.seqlen, self.minreadcoverage)
         
 
         if self.profile is None:
@@ -147,10 +148,11 @@ class EnsembleMap(object):
  
 
 
-    def initializeActiveCols(self, invalidcols=[], invalidrate=0.0001, 
+    def initializeActiveCols(self, invalidcols=[], inactivecols=[], invalidrate=0.0001, 
                              maxbg=0.02, minrxbg=0.002, verbal = True, **kwargs):
         """Apply quality filters to eliminate noisy nts from EM fitting
         invalidcols = list of columns to set to invalid
+        inactivecols = list of columns to set inactive
         invalidrate = columns with rates below this value are set to invalid
         maxbg       = maximum allowable background signal
         minrxbg     = minimum signal above background
@@ -161,6 +163,9 @@ class EnsembleMap(object):
         ###################################
         # initialize invalid positions
         ###################################
+        
+        # copy so we don't modify argument
+        invalidcols = invalidcols[:]
 
         if verbal and len(invalidcols)>0:
             print("Nts {} set invalid by user".format(self.ntindices[invalidcols]))
@@ -213,24 +218,38 @@ class EnsembleMap(object):
         # initialize inactive positions
         ###################################
         
+        inactive = []
+
+        for i in inactivecols:
+            if i not in self.invalid_columns:
+                inactive.append(i)
+
+        if verbal and len(inactive) > 0:
+            print("Nts set inactive by user: {}".format(self.ntindices[inactive]))
+        
+
+        lowrx = []
+ 
         if self.profile is not None:
-            
-            with np.errstate(divide='ignore',invalid='ignore'):
-                inactive = (self.profile.subprofile < minrxbg)
-            
-            # invalid columns are distinct from inactive
-            inactive[self.invalid_columns] = False
-        
-        else:
-            inactive = np.zeros(self.reads.shape[1], dtype=bool)
+            with np.errstate(invalid='ignore'):
+                for i in np.where(self.profile.subprofile < minrxbg)[0]:
+                    if i not in inactive and i not in self.invalid_columns:
+                        lowrx.append(i)
+                        inactive.append(i)
 
 
-        self.inactive_columns = np.where(inactive)[0]
-            
-        if verbal and len(self.inactive_columns)>0:
-            print("Nts {} set to inactive due to low modification rate".format(self.ntindices[self.inactive_columns]))
+        if verbal and len(lowrx) > 0:
+            print("Nts {} set to inactive due to low modification rate".format(self.ntindices[lowrx]))
 
         
+        inactive.sort()
+        self.inactive_columns = np.array(inactive, dtype=int)
+
+        if verbal and len(inactive) > len(lowrx):
+            print("Total inactive nts: {}".format(self.ntindices[inactive]))
+
+
+
         ###################################
         # remaining nts are active!
         ###################################
@@ -251,6 +270,28 @@ class EnsembleMap(object):
     def setColumns(self, activecols=None, inactivecols=None):
         """Set columns to specified values, if changed"""
         
+        # invalid_columns is usually initialized, but if circumventing initializeActiveCols
+        # via direct call to setColumns then need to init
+        if self.invalid_columns is None:
+            allcols = np.ones(self.seqlen, dtype=bool)
+            allcols[activecols] = False
+            allcols[inactivecols] = False
+            invalid = np.where(allcols)[0]
+            self.invalid_columns = np.array(invalid, dtype=int)
+            print("Cols {} initialized to inactive in setColumns".format(self.invalid_columns))
+
+
+        if inactivecols is not None and np.sum(np.isin(inactivecols, self.invalid_columns)) > 0:
+            conflict = np.where(np.isin(inactivecols, self.invalid_columns))[0]
+            print('WARNING! columns {} are invalid and cannot be set inactive'.format(inactivecols[conflict]))
+            inactivecols = np.delete(inactivecols, conflict)
+            
+        if activecols is not None and np.sum(np.isin(activecols, self.invalid_columns)) > 0:
+            conflict = np.where(np.isin(activecols, self.invalid_columns))[0]
+            print('WARNING! columns {} are invalid and cannot be set active'.format(activecols[conflict]))
+            activecols = np.delete(activecols, conflict)
+         
+
 
         if activecols is not None and inactivecols is not None:
             
@@ -264,6 +305,7 @@ class EnsembleMap(object):
                     np.sum(np.isin(inactivecols, activecols))>0:
                 raise ValueError('activecols and inactivecols are conflicting')
             
+
             totc = len(activecols) + len(inactivecols) + len(self.invalid_columns)
             if totc != self.seqlen:
                 raise ValueError('Not all columns assigned!')
@@ -570,10 +612,11 @@ class EnsembleMap(object):
         overallBestBM.imputeInactiveParams(self.reads, self.mutations)
 
         self.BMsolution = overallBestBM
+        self.BMsolution.sort_model()
 
         self.qualityCheck()
 
-
+            
         return self.BMsolution
 
     
@@ -607,8 +650,11 @@ class EnsembleMap(object):
         rms = self.BMsolution.model_rms_diff()
         absmean = self.BMsolution.model_absmean_diff()
         ndiff = self.BMsolution.model_num_diff()
-        p_err = max(self.BMsolution.p_err)
-       
+        try:
+            p_err = max(self.BMsolution.p_err)
+        except TypeError:
+            p_err = -1
+
         count = 0
     
         print('\n-----------------------------------------')
@@ -700,18 +746,14 @@ class EnsembleMap(object):
         # compute normalized parameters
         profiles = self.computeNormalizedReactivities()
         
-        # sort model components by population
-        idx = range(model.pdim)
-        idx.sort(key=lambda x: model.p[x], reverse=True)
-
 
         with open(output, 'w') as OUT:
 
             OUT.write("{0} components; BIC={1:.1f}\n".format(model.pdim, model.BIC))
             
             pline = 'p'
-            for i in idx:
-                pline += ' {0:.3f}'.format(model.p[i])
+            for p in model.p:
+                pline += ' {0:.3f}'.format(p)
             OUT.write(pline+'\n')
             
             OUT.write('Nt\tSeq\t')
@@ -726,8 +768,8 @@ class EnsembleMap(object):
                     muline += '{0}{1:.4f}'.format('nan\tnan\t\t'*model.pdim, self.profile.backprofile[nt])
 
                 else:
-                    for i in idx:
-                        muline += '{0:.4f}\t{1:.4f}\t\t'.format(profiles[i].normprofile[nt], profiles[i].rawprofile[nt])
+                    for prof in profiles:
+                        muline += '{0:.4f}\t{1:.4f}\t\t'.format(prof.normprofile[nt], prof.rawprofile[nt])
                     
                     muline += '{0:.4f}'.format(self.profile.backprofile[nt])
 
@@ -759,28 +801,22 @@ class EnsembleMap(object):
 
  
 
-    def computeRINGs2(self, window=1, maxreads=-1, corrtype='apc', bgfile=None, verbal=True):
+    def computeRINGs2(self, window=1, corrtype='apc', bgfile=None, verbal=True, subtractwindow=False):
         """Sample reads stochastically and return RINGexperiment objects for each model"""
         
         # setup the activestatus mask
         activestatus = np.zeros(self.seqlen, dtype=np.int8)
         activestatus[self.active_columns] = 1
-        
-        pdim = self.BMsolution.pdim
-        
-        read  = np.zeros( (pdim, self.seqlen, self.seqlen), dtype=np.int32)
-        comut = np.zeros( (pdim, self.seqlen, self.seqlen), dtype=np.int32)
-        inotj = np.zeros( (pdim, self.seqlen, self.seqlen), dtype=np.int32)
-        
+        activestatus[self.inactive_columns] = 1
+    
         # fill in the matrices
-        accessoryFunctions.fillRINGMatrix2(read, comut, inotj, self.reads, self.mutations,
-                                           activestatus, self.BMsolution.mu, self.BMsolution.p, 
-                                           maxreads, window)
+        read, comut, inotj = aFunc.fillRINGMatrix(self.reads, self.mutations, activestatus,
+                                                   self.BMsolution.mu, self.BMsolution.p, window, subtractwindow)
 
         relist = [] 
         
         # populate RINGexperiment objects
-        for p in xrange(pdim):
+        for p in xrange(self.BMsolution.pdim):
 
             ring = RINGexperiment(arraysize = self.seqlen,
                                   corrtype = corrtype,
@@ -808,9 +844,162 @@ class EnsembleMap(object):
 
         return relist
 
+ 
+    def computeRINGsNull(self, window=1, corrtype='apc', bgfile=None, verbal=True, subtractwindow=False):
+        """Sample reads stochastically and return RINGexperiment objects for each model"""
+        
+        from SynBernoulliMixture import SynBernoulliMixture
+        
+        # initialize synthetic model
+        null_model = SynBernoulliMixture(p=self.BMsolution.p, 
+                                         mu=self.BMsolution.mu,
+                                         bgrate=self.profile.backprofile)
+        
+        # generate synthetic reads 
+        nullEM = null_model.generateEMobject(self.reads.shape[0], nodata=0.0, verbal=False)
+ 
+
+        # setup the activestatus mask
+        activestatus = np.zeros(self.seqlen, dtype=np.int8)
+        activestatus[self.active_columns] = 1
+        activestatus[self.inactive_columns] = 1
+        
+        read, comut, inotj = aFunc.fillRINGMatrix(nullEM.reads, nullEM.mutations, activestatus,
+                                                  self.BMsolution.mu, self.BMsolution.p, window, subtractwindow)
+
+        relist = []
+
+        # populate RINGexperiment objects
+        for p in xrange(self.BMsolution.pdim):
+
+            ring = RINGexperiment(arraysize = self.seqlen,
+                                  corrtype = corrtype,
+                                  verbal = verbal)
+
+            ring.sequence = self.sequence
+
+            ring.window = window
+            ring.ex_readarr = read[p]
+            ring.ex_comutarr = comut[p]
+            ring.ex_inotjarr = inotj[p]
+        
+            relist.append(ring)
+
+
+        return relist
+
+
+    def computeRINGs3(self, window=1, corrtype='apc', bgfile=None, verbal=True, subtractwindow=False):
+        """Sample reads stochastically and return RINGexperiment objects for each model"""
+        
+        from SynBernoulliMixture import SynBernoulliMixture
+        
+        # initialize synthetic model
+        null_model = SynBernoulliMixture(p=self.BMsolution.p, 
+                                         mu=self.BMsolution.mu,
+                                         bgrate=self.profile.backprofile)
+        
+        # generate synthetic reads 
+        nullEM = null_model.generateEMobject(self.reads.shape[0], nodata=0.0, verbal=False)
+        
+
+        # setup the activestatus mask
+        activestatus = np.zeros(self.seqlen, dtype=np.int8)
+        activestatus[self.active_columns] = 1
+        activestatus[self.inactive_columns] = 1
+        
+        null_read, null_comut, null_inotj = aFunc.fillRINGMatrix(nullEM.reads, nullEM.mutations, activestatus,
+                                                                  self.BMsolution.mu, self.BMsolution.p, window, subtractwindow)
+
+
+        # fill in the matrices
+        read, comut, inotj = aFunc.fillRINGMatrix(self.reads, self.mutations, activestatus,
+                                                   self.BMsolution.mu, self.BMsolution.p, window, subtractwindow)
+        
+        corrlist = []
+        # populate RINGexperiment objects
+        for p in xrange(self.BMsolution.pdim):
+            
+            corrlist.append([])
+
+            ring = RINGexperiment(arraysize = self.seqlen,
+                                  corrtype = corrtype,
+                                  verbal = verbal)
+
+            ring.sequence = self.sequence
+
+            ring.window = window
+            ring.ex_readarr = read[p]
+            ring.ex_comutarr = comut[p]
+            ring.ex_inotjarr = inotj[p]
+        
+            print '-'*50
+
+            for i in xrange(self.seqlen):
+                for j in xrange(i+6, self.seqlen):
+                    
+                    corr = ring._mistatistic(read[p,i,j], inotj[p,i,j], inotj[p,j,i], comut[p,i,j])
+                    null_corr = ring._mistatistic(null_read[p,i,j], null_inotj[p,i,j], null_inotj[p,j,i], null_comut[p,i,j])
+
+                    g = newG(i,j, read[p], inotj[p], comut[p], null_read[p], null_inotj[p], null_comut[p])
+                    if corr>20 and null_corr<6.635 and g>20:
+                        corrlist[p].append((i,j, corr, null_corr, g, read[p,i,j], inotj[p,i,j], inotj[p,j,i], comut[p,i,j], null_read[p,i,j], null_inotj[p,i,j], null_inotj[p,j,i], null_comut[p,i,j]))
+
+                        print('{0} {1} {2:.1f} {3:.1f} ; {4:.1f} ; {5} {6:.3f} {7:.3f} {8:.5f} ; {9} {10:.3f} {11:.3f} {12:.5f}'.format(i+1,j+1, corr, null_corr, g, read[p,i,j], float(inotj[p,i,j])/read[p,i,j], float(inotj[p,j,i])/read[p,i,j], float(comut[p,i,j])/read[p,i,j], null_read[p,i,j], float(null_inotj[p,i,j])/null_read[p,i,j], float(null_inotj[p,j,i])/null_read[p,i,j], float(null_comut[p,i,j])/null_read[p,i,j]))
+        return corrlist
+
+
+
+
+    def computeRINGs4(self, window=1, corrtype='apc', bgfile=None, verbal=True, subtractwindow=False):
+        """Sample reads stochastically and return RINGexperiment objects for each model"""
+        
+        relist = EM.computeRINGs2(window=window, verbal=verbal, bgfile=bgfile, subtractwindow=subtractwindow) 
+        null = EM.computeRINGsNull(window=window, verbal=verbal, bgfile=bgfile, subtractwindow=subtractwindow)
+
+
+
+
+    def writeReadsMutations(self, outputfile):
+
+        with open(outputfile, 'w') as out:
+
+            for i in range(self.reads.shape[0]):
+
+                out.write('MERGED {0} {1} {2} INCLUDED 0 0 '.format(i, 0, self.reads.shape[1]))
+                np.savetxt(out, self.reads[i,:], fmt='%d', newline='')
+                out.write(' ')
+                np.savetxt(out, self.mutations[i,:], fmt='%d', newline='')
+                out.write('\n')
+
+
 
     
 ####################################################################################
+
+def newG(i,j, read, inotj, comut, null_read, null_inotj, null_comut):
+
+    a = float(read[i,j]-inotj[i,j]-inotj[j,i]-comut[i,j])
+    null_a = float(null_read[i,j]-null_inotj[i,j]-null_inotj[j,i]-null_comut[i,j])
+    
+    if read[i,j] == 0 or null_read[i,j] == 0:
+        return 0
+    
+    g=0
+    if a>0 and null_a>0:
+        g += a*np.log( (a/read[i,j]) / (null_a/null_read[i,j]) )
+    if inotj[i,j] > 0 and null_inotj[i,j] > 0:
+        g += inotj[i,j]*np.log( (float(inotj[i,j])/read[i,j]) / (float(null_inotj[i,j])/null_read[i,j]) )
+    if inotj[j,i] > 0 and null_inotj[j,i] > 0:
+        g += inotj[j,i]*np.log( (float(inotj[j,i])/read[i,j]) / (float(null_inotj[j,i])/null_read[i,j]) )
+    if comut[i,j] >0 and null_comut[i,j] > 0:
+        g += comut[i,j]*np.log( (float(comut[i,j])/read[i,j]) / (float(null_comut[i,j])/null_read[i,j]) )
+    
+    return 2*g
+
+
+
+
 
 
 def parseArguments():
@@ -869,6 +1058,8 @@ def parseArguments():
     optional.add_argument('--suppressverbal', action='store_false', help='Suppress verbal output')
     optional.add_argument('--outputprefix', type=str, default='emfit', help='Write output files with this prefix (default=emfit)')
     
+    optional.add_argument('--subwindow', action='store_true', help='Subtract window when doing RING calcs')
+
     parser._action_groups.append(optional)
 
     args = parser.parse_args()
@@ -946,7 +1137,8 @@ if __name__=='__main__':
     if args.ring:
 
         relist = EM.computeRINGs2(window=args.window, verbal=args.suppressverbal,
-                                  bgfile=args.untreated_parsed)
+                                  bgfile=args.untreated_parsed, subtractwindow=args.subwindow)
+        
 
         for i,model in enumerate(relist):
             model.computeCorrelationMatrix(verbal=args.suppressverbal)
@@ -959,17 +1151,16 @@ if __name__=='__main__':
         profiles = EM.computeNormalizedReactivities()
 
         relist = EM.computeRINGs2(window=3, verbal=args.suppressverbal, 
-                                  bgfile=args.untreated_parsed)
+                                  bgfile=args.untreated_parsed, subtractwindow=args.subwindow)
         
-
         for i,model in enumerate(relist):
             model.computeCorrelationMatrix(verbal=args.suppressverbal, corrbuffer=6)
-
-            #model.computeZscores()
+            
+            model.writeCorrelations('{0}-{1}-allcorrs.txt'.format(args.outputprefix,i), chi2cut=20)
 
             pairs = PairMapper(model, profiles[i])
             pairs.writePairs('{0}-{1}-pairmap.txt'.format(args.outputprefix, i))
-            pairs.writePairBonusFile('{0}-{1}-pairmap.bp'.format(args.outputprefix,i), 20, fileformat=1)      
+            pairs.writePairBonusFile('{0}-{1}-pairmap.bp'.format(args.outputprefix, i), 20, fileformat=1)      
 
 
             

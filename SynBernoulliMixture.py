@@ -6,17 +6,18 @@ import ringmapperpath
 sys.path.append(ringmapperpath.path())
 
 from EnsembleMap import EnsembleMap
+from BernoulliMixture import BernoulliMixture
 from ReactivityProfile import ReactivityProfile
 
 
 
 class SynBernoulliMixture():
 
-    def __init__(self, p=None, mu=None):
+    def __init__(self, p=None, mu=None, bgrate=None, fname=None):
         """p is 1D array with population of each model
         mu is MxN 2D array with Bernoulli probs of each state
         """
-            
+        
         defpar = int(p is None) + int(mu is None)
             
         if defpar == 1:
@@ -25,15 +26,39 @@ class SynBernoulliMixture():
         elif defpar == 0:
             self.p = p
             self.mu = mu
+            self.correlations = [ [] for x in self.p ]
             self.compileModel()
 
         else:
             self.p = []
             self.mu = []
-            
-        self.bgrate = None
+            self.correlations = []
+        
+        self.bgrate = bgrate
+        self.active_columns = None
+        self.inactive_columns = None
+    
+
+        if fname is not None:
+            self.readModelfromFile(fname)
 
     
+    def readModelfromFile(self, fname):
+
+        BM = BernoulliMixture()
+        BM.readModelFromFile(fname)
+
+        self.p = BM.p
+        self.mu = BM.mu
+        self.mu[np.isnan(self.mu)] = -1
+
+        self.correlations = [ [] for x in self.p ] 
+
+        self.active_columns = BM.active_columns
+        self.inactive_columns = BM.inactive_columns
+
+
+            
     def compileModel(self):
         """Convert arrays to numpy arrays and check for errors"""
         
@@ -46,6 +71,10 @@ class SynBernoulliMixture():
             raise AttributeError('Model populations don\'t sum to 1!')
         if self.p.size != self.mu.shape[0]:
             raise AttributeError('P and mu have inconsistent dimensions: p={0}, mu={1}'.format(self.p.size, self.mu.shape))
+        
+
+        if len(self.correlations) != len(self.p):
+            raise AttributeError('Correlation array doesn\'t match model dimension')
 
 
 
@@ -62,6 +91,9 @@ class SynBernoulliMixture():
 
         self.p.append(p)
 
+        self.correlations.append( [] )
+
+
 
     def readParFile(self, inpfile):
         """Read model parameters from file"""
@@ -75,6 +107,30 @@ class SynBernoulliMixture():
         return np.array(data)
 
     
+    
+    def addCorrelation(self, i, j, modelnum, coupling):
+
+        
+        i_marg = self.mu[modelnum, i]
+        j_marg = self.mu[modelnum, j]
+
+        
+        joint = min(coupling*i_marg*j_marg, 0.5*i_marg, 0.5*j_marg)
+
+        probarray = np.array([1 - i_marg - j_marg + joint,
+                              i_marg - joint,
+                              j_marg - joint, 
+                              joint])
+
+        if min(probarray) < 0 or not np.isclose(probarray.sum(), 1):
+            print probarray
+            raise ValueError('Invalid correlation parameters')
+
+
+        self.correlations[modelnum].append( (i,j,probarray) ) 
+
+
+
 
     def generateReads(self, num_reads, nodata_rate = 0.05):
         
@@ -91,21 +147,45 @@ class SynBernoulliMixture():
         # by default, things are not mutated (=0)
         muts = np.zeros((num_reads, seqlen), dtype=np.int8)
 
-        for i in xrange(num_models):
+        for m in xrange(num_models):
             
             # create mask of items to select
             mask = np.zeros(muts.shape, dtype=bool)
 
             # set mask based on reactivity, for now treating all 
-            # reads as belonging to model i
-            mask[np.random.random(muts.shape) <= self.mu[i,:]] = True
+            # reads as belonging to model m
+            mask[np.random.random(muts.shape) <= self.mu[m,:]] = True
             
-            # deselect rows that aren't from model i 
-            mask[(assignments != i),] = False
+            # deselect rows that aren't from model m
+            mask[(assignments != m),] = False
             
             # set muts
             muts[mask] = 1
         
+
+            for corr in self.correlations[m]:
+                
+                selector = np.random.choice(4, num_reads, p=corr[2])
+
+                mask = (assignments == m) & (selector == 0)
+                muts[mask, corr[0]] = 0
+                muts[mask, corr[1]] = 0
+
+                mask = (assignments == m) & (selector == 1)
+                muts[mask, corr[0]] = 1
+                muts[mask, corr[1]] = 0
+
+                mask = (assignments == m) & (selector == 2)
+                muts[mask, corr[0]] = 0
+                muts[mask, corr[1]] = 1
+
+                mask = (assignments == m) & (selector == 3)
+                muts[mask, corr[0]] = 1
+                muts[mask, corr[1]] = 1
+
+
+                
+
 
         # generate the reads matrix; default is nts are read
         reads = np.ones((num_reads, seqlen), dtype=np.int8)
@@ -122,6 +202,7 @@ class SynBernoulliMixture():
 
     def generateEMobject(self, num_reads, nodata_rate=0.05, **kwargs):
 
+        num_reads = int(num_reads)
 
         EM = EnsembleMap(seqlen=self.mu.shape[1])     
         
@@ -140,8 +221,11 @@ class SynBernoulliMixture():
             # normalize with DMS false because we don't have sequence info (it doesn't matter anyways)
             EM.profile.backgroundSubtract(normalize=True, DMS=False) 
 
+        if self.active_columns is None or self.inactive_columns is None:
+            EM.initializeActiveCols(**kwargs)
+        else:
+            EM.setColumns(activecols=self.active_columns, inactivecols=self.inactive_columns)
 
-        EM.initializeActiveCols(**kwargs)
 
         return EM
 
@@ -156,38 +240,28 @@ class SynBernoulliMixture():
             
             OUT.write('# P\n')
             np.savetxt(OUT, self.p[sortidx], fmt='%.4f', newline=' ')
-            OUT.write('\n\n#Mu ; bg\n')
+            OUT.write('\n# P_err\n')
+            OUT.write('-1 '*len(self.p))
+
+            OUT.write('\n\n# Mu ; bg\n')
 
             for i in range(self.mu.shape[1]):
+                OUT.write('{} '.format(i+1))
                 np.savetxt(OUT, self.mu[sortidx,i], fmt='%.4f', newline=' ')
                 OUT.write('; {0:.4f}\n'.format(self.bgrate[i]))
 
-
-
-    def simulateCorrelations(self, modelnum, corrlist):
-        """Add in correlations to synthetic reads originating from model=modelnum
-        corrlist is list of (i,j,alpha) tuples, where i and j are nts (1-based numbering)
-        and alpha is strength of correlation:
-            pij = alpha*pi*pj
-        """
-
-        asgn_mask = (self.read_assignments == modelnum)
-
-        for n1,n2,alpha in corrlist:
             
-            n1 -= 1
-            n2 -= 1
+            
+            for m in range(len(self.p)):
+                OUT.write('\n# Correlations {}\n'.format(m))
+                
+                corrs = self.correlations[m]
+                corrs.sort()
+                for c in corrs:
+                    OUT.write('{0} {1} {2:.4f} {3:.4f} {4:.4f}\n'.format(c[0]+1, c[1]+1, c[2][3], self.mu[m,c[0]], self.mu[m,c[1]]))
 
-            # compute the joint probability (independent muts)
-            prob = (alpha-1)*self.mu[modelnum,n1]
-            
-            # select positions that should be mutated
-            rmask = (np.random.random(len(asgn_mask)) < prob)
-            # build total mask
-            totmask = asgn_mask & rmask & self.reads[:,n2]
-            
-            # update the reads
-            self.reads[totmask, n1] = 1
+    
+
 
 
 

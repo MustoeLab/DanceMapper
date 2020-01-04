@@ -16,6 +16,8 @@ import numpy
 # get path to functions needed for mutstring I/O
 import ringmapperpath
 
+import sys
+sys.path.append(ringmapperpath.path())
 
 ext = Extension('accessoryFunctions', 
                 sources=['accessoryFunctions.pyx', 'dSFMT/dSFMT.c'], 

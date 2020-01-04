@@ -305,11 +305,17 @@ def maximizeMu(double[:,::1] mu, double[:,::1] readWeights,
 ##################################################################################
 
 
-def fillRINGMatrix2(int[:,:,::1] read_arr, int[:,:,::1] comut_arr, int[:,:,::1] inotj_arr,
-                    char[:,::1] reads, char[:,::1] mutations, char[:] activestatus,
-                    double[:,::1] mu, double[:] p, int maxreads, int window): 
+def fillRINGMatrix(char[:,::1] reads, char[:,::1] mutations, char[:] activestatus,
+                   double[:,::1] mu, double[:] p, int window, int subtractwindow): 
     """active status is array continaing 0/1 whether or not column is active"""
     
+
+    # initialize RING matrices
+    cdef int[:,:,::1] read_arr = np.zeros((p.shape[0], mu.shape[1], mu.shape[1]), dtype=np.int32)
+    cdef int[:,:,::1] comut_arr = np.zeros((p.shape[0], mu.shape[1], mu.shape[1]), dtype=np.int32)
+    cdef int[:,:,::1] inotj_arr = np.zeros((p.shape[0], mu.shape[1], mu.shape[1]), dtype=np.int32)
+
+
     # declare counters
     cdef int n,i,j,m
 
@@ -365,7 +371,9 @@ def fillRINGMatrix2(int[:,:,::1] read_arr, int[:,:,::1] comut_arr, int[:,:,::1] 
             # subtract i
             for m in xrange(pdim):
                 ll_i[m] = loglike[m]
-            _subtractloglike(ll_i, i, window, reads[n,:], mutations[n,:], activestatus, logmu, clogmu)
+
+            if subtractwindow:
+                _subtractloglike(ll_i, i, window, reads[n,:], mutations[n,:], activestatus, logmu, clogmu)
             
             # compute weight of read ignoring i
             _loglike2prob(ll_i, weights)
@@ -389,7 +397,8 @@ def fillRINGMatrix2(int[:,:,::1] read_arr, int[:,:,::1] comut_arr, int[:,:,::1] 
                     ll_ij[m] = ll_i[m]
                 
                 # subtract j
-                _subtractloglike(ll_ij, j, window, reads[n,:], mutations[n,:], activestatus, logmu, clogmu)
+                if subtractwindow:
+                    _subtractloglike(ll_ij, j, window, reads[n,:], mutations[n,:], activestatus, logmu, clogmu)
                 
                 # compute weight of read ignoring i & j
                 _loglike2prob(ll_ij, weights) 
@@ -399,7 +408,8 @@ def fillRINGMatrix2(int[:,:,::1] read_arr, int[:,:,::1] comut_arr, int[:,:,::1] 
                 for m in xrange(pdim):
                     
                     # add the read
-                    if dsfmt_genrand_close_open(&dsfmt) <= weights[m]:
+                    if weights[m] > 0.9:
+                    #if dsfmt_genrand_close_open(&dsfmt) <= weights[m]:
                         read_arr[m,i,j] += 1
                         if icode == 1 and jcode == 1:
                             comut_arr[m,i,j] += 1
@@ -409,7 +419,9 @@ def fillRINGMatrix2(int[:,:,::1] read_arr, int[:,:,::1] comut_arr, int[:,:,::1] 
                             inotj_arr[m,j,i] += 1
                         
 
-                                    
+    return read_arr, comut_arr, inotj_arr                                    
+
+
 
 
 cdef void _subtractloglike(double[:] loglike, int i_index, int window, 

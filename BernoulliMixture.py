@@ -5,9 +5,12 @@ import itertools, sys, copy, time
 from collections import deque
 
 try:
+    import ringmapperpath
+    sys.path.append(ringmapperpath.path())
     import accessoryFunctions
 except:
     print('WARNING: Could not import accessoryFunctions!')
+
 
 
 class ConvergenceError(Exception):
@@ -150,9 +153,9 @@ class ConvergenceMonitor(object):
             # compute ratio of reactivities
             ratio = np.abs(np.log(activemu[i]/activemu[j]))
             hivalues.update( np.where(ratio > ratioCutoff)[0] )
-        
+            
         hivalues = self.active_columns[sorted(hivalues)]
-
+        
         if len(hivalues)>0:
             raise ConvergenceError('Columns with high mu ratio', self.step, hivalues)
 
@@ -170,6 +173,7 @@ class ConvergenceMonitor(object):
         for i,j in itertools.combinations(range(mu.shape[0]), 2):
             
             d = np.square(activemu[i,:] - activemu[j,:])
+            
             excludevalue = np.percentile(d, excludepercent)
             diff = np.sqrt( np.mean( d[d<=excludevalue] ) )
             
@@ -205,37 +209,53 @@ class ConvergenceMonitor(object):
         """
 
         activemu = mu[:, self.active_columns]
-        
-        badidxs = []
+        activecols = self.active_columns
+
+        badidxs = set()
 
         # iterate through all params
         for i,j in itertools.permutations(range(mu.shape[0]), 2):
  
             # identify positions with high difference in reactivity
             ratio = activemu[i]/activemu[j] 
-            hivalues = np.where(ratio > 100)[0]
+            hivalues = np.where(ratio > 10)[0]
             
-            # scan 5' of each hi ratio value to see if artifact
             for idx in hivalues:
                 
-                allzero = True
-                for m in range(1,6):
-                    
-                    try:
-                        ntdiff = self.active_columns[idx] - self.active_columns[idx-m]
-                    except IndexError:
-                        break
-                    
-                    # if at least one upstream nt is decently reactive, not an artifact
-                    if ntdiff < 6 and activemu[i,idx-m]>0.001:
-                        allzero = False
+                colidx = activecols[idx]
 
-                
-                if allzero:
-                    badidxs.append(idx)
+                # scan 5' of each hi ratio value to see if artifact
+                suppressed = True
+                counted = False
+                for m in range(1,6):
+                    # if at least one nt is decently reactive, not an artifact
+                    if (idx-m)>=0 and (activecols[idx]-activecols[idx-m])<6:
+                        counted = True
+                        if ratio[idx-m] > 0.1:
+                            suppressed = False
+
+                if counted and suppressed:
+                    badidxs.add(idx)
+                    continue
+
+
+                # scan 3' of each hi ratio value to see if artifact
+                suppressed = True
+                counted = False
+                for m in range(1,6):
+                    # if at least one nt is decently reactive, not an artifact
+                    if (idx+m)<len(activecols) and (activecols[idx+m]-activecols[idx])<6:
+                        counted = True
+                        if ratio[idx+m] > 0.1:
+                            suppressed = False
+                    
+                if counted and suppressed:
+                    badidxs.add(idx) 
+
+        badidxs = self.active_columns[sorted(badidxs)]
 
         if len(badidxs) > 0:
-            raise ConvergenceError('Anticorrelated Mu artifact', self.step, badidxs)
+            raise ConvergenceError('Potential anticorrelated Mu artifact', self.step, badidxs)
 
 
 
@@ -732,21 +752,20 @@ class BernoulliMixture(object):
     
 
 
-    def _writeModelParams(self, OUT):
+    def _writeModelParams(self, OUT, sort_model=False):
         """Write out the params of the model to object OUT in a semi-human readable form"""
-            
-        # sort model components by population
-        sortidx = range(self.pdim)
-        sortidx.sort(key=lambda x: self.p[x], reverse=True)
+        
+        if sort_model:
+            self.sort_model()
 
 
         OUT.write('# P\n')
-        np.savetxt(OUT, self.p[sortidx], fmt='%.16f', newline=' ')
+        np.savetxt(OUT, self.p, fmt='%.16f', newline=' ')
         
         OUT.write('\n# P_uncertainty\n')
         try:
-            np.savetxt(OUT, self.p_err[sortidx], fmt='%.16f', newline=' ')
-        except TypeError:
+            np.savetxt(OUT, self.p_err, fmt='%.16f', newline=' ')
+        except (TypeError, ValueError):
             OUT.write('-- '*self.pdim)
 
         OUT.write('\n\n# Nt Mu ; Mu_err\n')
@@ -767,11 +786,11 @@ class BernoulliMixture(object):
                 OUT.write('{0} ; {0} i'.format('-- '*self.pdim))
 
             else:
-                np.savetxt(OUT, self.mu[sortidx,i], fmt='%.16f', newline=' ')
+                np.savetxt(OUT, self.mu[:,i], fmt='%.16f', newline=' ')
                 
                 OUT.write('; ')
                 try:
-                    np.savetxt(OUT, self.mu_err[sortidx, i], fmt='%.4f', newline=' ')
+                    np.savetxt(OUT, self.mu_err[:, i], fmt='%.4f', newline=' ')
                 except TypeError:
                     OUT.write('-- '*self.pdim)
 
@@ -783,7 +802,7 @@ class BernoulliMixture(object):
     
         
         OUT.write('\n# Initial P\n')
-        np.savetxt(OUT, self.p_initial[sortidx], fmt='%.16f', newline=' ')
+        np.savetxt(OUT, self.p_initial, fmt='%.16f', newline=' ')
         
         # write out full initial mu without worrying about active/inactive
         OUT.write('\n\n# Initial Mu\n')
@@ -793,7 +812,7 @@ class BernoulliMixture(object):
             else:
                 OUT.write('{0} '.format(i))
 
-            np.savetxt(OUT, self.mu_initial[sortidx,i], fmt='%.16f', newline=' ')
+            np.savetxt(OUT, self.mu_initial[:,i], fmt='%.16f', newline=' ')
             OUT.write('\n')
     
 
@@ -962,8 +981,8 @@ class BernoulliMixture(object):
         lastmu = np.copy(self.mu)
         converged = False
         nsteps = 0
-        while not converged and nsteps<100:
-
+        while not converged and nsteps<1000:
+            
             # update posterior probs based on inactive_column info
             if nsteps > 0:
                 accessoryFunctions.loglikelihoodmatrix(W, reads, mutations, combined_columns, self.mu, self.p)
@@ -972,7 +991,8 @@ class BernoulliMixture(object):
             
             # update inactive mu
             accessoryFunctions.maximizeMu(self.mu, W, reads, mutations, self.inactive_columns, self.priorA, self.priorB)
-        
+            
+
             if np.max(np.abs(lastmu-self.mu)) < 1e-4:
                 converged = True
             
@@ -1073,6 +1093,27 @@ class BernoulliMixture(object):
 
 
 
+    def sort_model(self):
+        """Sort the model by population"""
+        
+        if len(self.p) == 1:
+            return
+
+        # sort model components by population
+        sortidx = range(self.pdim)
+        sortidx.sort(key=lambda x: self.p[x], reverse=True)
+
+        
+        self.p = self.p[sortidx]
+        self.p_err = self.p_err[sortidx]
+        self.mu = self.mu[sortidx]
+        self.mu_err = self.mu_err[sortidx]
+
+        self.p_initial = self.p_initial[sortidx]
+        self.mu_initial = self.mu_initial[sortidx]
+        
+        self.priorA = self.priorA[sortidx]
+        self.priorB = self.priorB[sortidx]
 
 
 
