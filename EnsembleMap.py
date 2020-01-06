@@ -266,7 +266,7 @@ class EnsembleMap(object):
         self.initialActiveCount = len(self.active_columns)
 
         if verbal:
-            print("{} initial active columns".format(self.initialActiveCount)
+            print("{} initial active columns".format(self.initialActiveCount))
         
         
     
