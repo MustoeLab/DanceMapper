@@ -34,6 +34,8 @@ class EnsembleMap(object):
         # np.array of sequence positions to actively cluster 
         self.active_columns=None
         
+        self.initialActiveCount = 1
+
         # np.array of sequence positions to 'inactively' cluster
         self.inactive_columns=None
 
@@ -261,8 +263,10 @@ class EnsembleMap(object):
 
         self.active_columns = np.array(active)
         
+        self.initialActiveCount = len(self.active_columns)
+
         if verbal:
-            print("{} initial active columns".format(len(self.active_columns)))
+            print("{} initial active columns".format(self.initialActiveCount)
         
         
     
@@ -352,6 +356,10 @@ class EnsembleMap(object):
         """
         
         if len(columns) == 0:
+            return
+        
+        if len(self.active_columns)-len(columns) < 0.9*self.initialActiveCount:
+            print("Call to setActiveColumnsInactive ignored -- maximum inactive exceeded")
             return
 
         self.inactive_columns = np.append(self.inactive_columns, columns)
@@ -496,10 +504,21 @@ class EnsembleMap(object):
 
 
         # END of while loop
-
-        if bestfitcount == soln_termcount and verbal:
-            print('{0} identical fits found. Terminating trials'.format(bestfitcount))
         
+        if verbal:
+            self.printEMFitSummary(bestfit, fitlist)
+            self.qualityCheck(bestfit)
+
+
+        if bestfitcount != soln_termcount:
+            bestfit = None
+            if verbal:
+                print('Bestfit solution only found {} times -- unstable!!!')
+        
+        elif verbal:
+            print('{0} identical fits found'.format(bestfitcount))
+        
+
 
         # reset the active/inactive cols if necessary
         if bestfit is not None:
@@ -507,7 +526,7 @@ class EnsembleMap(object):
                             inactivecols=bestfit.inactive_columns)    
         
 
-        return bestfit, fitlist
+        return bestfit
         
 
 
@@ -569,7 +588,7 @@ class EnsembleMap(object):
             if verbal: print('\nAdvancing to {}-component model\n'.format(c))
 
 
-            bestBM, fitlist = self.fitEM(c, verbal=verbal, writeintermediate=writeintermediate, **kwargs)
+            bestBM = self.fitEM(c, verbal=verbal, writeintermediate=writeintermediate, **kwargs)
              
 
             # terminate if no valid solution found             
@@ -577,11 +596,7 @@ class EnsembleMap(object):
                 if verbal:  print("No valid solution for {0}-component model".format(c))
                 break
              
-            elif verbal:
-                self.printEMFitSummary(bestBM, fitlist)
-                self.qualityCheck(bestBM)
-
-
+       
             priorBIC = self.compareBIC(bestBM, overallBestBM, verbal=verbal)
 
             deltaBIC = bestBM.BIC-priorBIC
