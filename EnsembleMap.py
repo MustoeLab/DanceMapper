@@ -505,15 +505,14 @@ class EnsembleMap(object):
 
         # END of while loop
         
-        if verbal:
+        if verbal and bestfit is not None:
             self.printEMFitSummary(bestfit, fitlist)
             self.qualityCheck(bestfit)
 
-
-        if bestfitcount != soln_termcount:
+        if bestfit is not None and bestfitcount != soln_termcount:
             bestfit = None
             if verbal:
-                print('Bestfit solution only found {} times -- unstable!!!')
+                print('\nBestfit solution only found {} times -- unstable!!!\n'.format(bestfitcount))
         
         elif verbal:
             print('{0} identical fits found'.format(bestfitcount))
@@ -710,7 +709,7 @@ class EnsembleMap(object):
             print('\nWARNING: {}/4 checks FAILED!'.format(count))
             print('\t\tSolution may be untrustworthy')
         
-        print('-----------------------------------------')
+        print('-----------------------------------------\n')
        
 
 
