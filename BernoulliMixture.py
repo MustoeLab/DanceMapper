@@ -441,7 +441,7 @@ class BernoulliMixture(object):
 
         #self.dynamic_weight = weight
         #self.dynamic_baserate = baserate
-        
+
         self.priorA = baserate*readdepth*weight*np.ones((self.pdim, self.mudim))+1
         self.priorB = np.ones((self.pdim, self.mudim))+1
 

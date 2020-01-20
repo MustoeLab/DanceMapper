@@ -358,7 +358,7 @@ class EnsembleMap(object):
         if len(columns) == 0:
             return
         
-        if len(self.active_columns)-len(columns) < 0.9*self.initialActiveCount:
+        if len(self.active_columns)-len(columns) < 0.8*self.initialActiveCount:
             print("Call to setActiveColumnsInactive ignored -- maximum inactive exceeded")
             return
 
@@ -474,7 +474,7 @@ class EnsembleMap(object):
                 # using the smallest list
                 pdiff, mudiff = BM.modelDifference(bestfit, func=np.max)
 
-                if pdiff < 0.01 and mudiff < 0.01:
+                if pdiff < 0.03 and mudiff < 0.01:
                     bestfitcount += 1
                     if BM.BIC < bestfitBIC:
                         bestfit = BM
@@ -514,7 +514,7 @@ class EnsembleMap(object):
             if verbal:
                 print('\nBestfit solution only found {} times -- unstable!!!\n'.format(bestfitcount))
         
-        elif verbal:
+        elif bestfit is not None and verbal:
             print('{0} identical fits found'.format(bestfitcount))
         
 
@@ -1049,11 +1049,11 @@ def parseArguments():
     fitopt = parser.add_argument_group('options for fitting data')
     fitopt.add_argument('--fit', action='store_true', help='Flag specifying to fit data')
     fitopt.add_argument('--maxcomponents', type=int, default=5, help='Maximum number of components to fit (default=5)')
-    fitopt.add_argument('--trials', type=int, default=20, help='Maximum number of fitting trials at each component number (default=20)')
+    fitopt.add_argument('--trials', type=int, default=50, help='Maximum number of fitting trials at each component number (default=50)')
     fitopt.add_argument('--badcol_cutoff', type=int, default=5, help='Inactivate column after it causes a failure X number of times *after* a valid soln has already been found (default=5)')
     fitopt.add_argument('--writeintermediates', action='store_true', help='Write each BM solution to file with specified prefix. Will be saved as prefix-intermediate-[component]-[trial].bm')
 
-    fitopt.add_argument('--priorWeight', type=float, default=0.001, help='Relative weight of dynamic prior on Mu (default=0.1). Dynamic prior method is disabled by passing -1, upon which a static naive prior is used. Valid weights are within the (0,1) interval. Default = 0.01 (dynamic method enabled).')
+    fitopt.add_argument('--priorWeight', type=float, default=0.001, help='Weight of prior on Mu (default=0.001). Prior = priorWeight*readDepth*bgRate at each nt. Prior is disabled by passing -1, upon which a naive prior is used.')
 
 
     ############################################################
