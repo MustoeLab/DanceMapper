@@ -856,13 +856,14 @@ class EnsembleMap(object):
                     ring.bg_comutarr = relist[0].bg_comutarr
                     ring.bg_inotjarr = relist[0].bg_inotjarr
 
+            ring.computeCorrelationMatrix()
 
             relist.append(ring)
 
         return relist
 
  
-    def computeRINGsNull(self, window=1, corrtype='apc', bgfile=None, verbal=True, subtractwindow=False):
+    def computeRINGsNull(self, window=1, corrtype='g', verbal=True, subtractwindow=False):
         """Sample reads stochastically and return RINGexperiment objects for each model"""
         
         from SynBernoulliMixture import SynBernoulliMixture
@@ -899,10 +900,11 @@ class EnsembleMap(object):
             ring.ex_readarr = read[p]
             ring.ex_comutarr = comut[p]
             ring.ex_inotjarr = inotj[p]
-        
+            
+            ring.computeCorrelationMatrix()
+
             relist.append(ring)
-
-
+            
         return relist
 
 
@@ -949,7 +951,9 @@ class EnsembleMap(object):
             ring.ex_readarr = read[p]
             ring.ex_comutarr = comut[p]
             ring.ex_inotjarr = inotj[p]
-        
+            
+            ring.computeCorrelationMatrix()
+
             print '-'*50
 
             for i in xrange(self.seqlen):
@@ -959,22 +963,48 @@ class EnsembleMap(object):
                     null_corr = ring._mistatistic(null_read[p,i,j], null_inotj[p,i,j], null_inotj[p,j,i], null_comut[p,i,j])
 
                     g = newG(i,j, read[p], inotj[p], comut[p], null_read[p], null_inotj[p], null_comut[p])
-                    if corr>20 and null_corr<6.635 and g>20:
-                        corrlist[p].append((i,j, corr, null_corr, g, read[p,i,j], inotj[p,i,j], inotj[p,j,i], comut[p,i,j], null_read[p,i,j], null_inotj[p,i,j], null_inotj[p,j,i], null_comut[p,i,j]))
+                    if corr>20 and null_corr<6.635: # and g>20:
 
-                        print('{0} {1} {2:.1f} {3:.1f} ; {4:.1f} ; {5} {6:.3f} {7:.3f} {8:.5f} ; {9} {10:.3f} {11:.3f} {12:.5f}'.format(i+1,j+1, corr, null_corr, g, read[p,i,j], float(inotj[p,i,j])/read[p,i,j], float(inotj[p,j,i])/read[p,i,j], float(comut[p,i,j])/read[p,i,j], null_read[p,i,j], float(null_inotj[p,i,j])/null_read[p,i,j], float(null_inotj[p,j,i])/null_read[p,i,j], float(null_comut[p,i,j])/null_read[p,i,j]))
+                        corrlist[p].append((i,j, corr, ring.ex_correlations[i,j], null_corr, g, inotj[p,i,j]/float(read[p,i,j]), inotj[p,j,i]/float(read[p,i,j])))
+                        
+                        print('{0} {1} {2:.1f} {3:.1f} ; {4:.1f} ; {5:.1f} ; {6:.3f} {7:.3f}'.format(*corrlist[p][-1]))
+
         return corrlist
 
 
 
 
-    def computeRINGs4(self, window=1, corrtype='apc', bgfile=None, verbal=True, subtractwindow=False):
+    def computeRINGs4(self, window=1, bgfile=None, verbal=True, subtractwindow=False):
         """Sample reads stochastically and return RINGexperiment objects for each model"""
         
-        relist = EM.computeRINGs2(window=window, verbal=verbal, bgfile=bgfile, subtractwindow=subtractwindow) 
-        null = EM.computeRINGsNull(window=window, verbal=verbal, bgfile=bgfile, subtractwindow=subtractwindow)
+        # compute rings from experimental data
+        relist = self.computeRINGs2(window=window, verbal=verbal, bgfile=bgfile, subtractwindow=subtractwindow) 
+        
+        # compute correlations from null model (clustering only w/o correlations)
+        null = self.computeRINGsNull(window=window, verbal=verbal, subtractwindow=subtractwindow)
 
+        corrlist = []
 
+        # iterate through each model and mask out corrs present in the null model
+        for p in range(len(relist)):
+            
+            corrlist.append([])
+            
+            for i,j in relist[p].significantCorrelations('ex',20):
+                
+                g = newG(i,j, relist[p].ex_readarr, relist[p].ex_inotjarr, relist[p].ex_comutarr, 
+                         null[p].ex_readarr, null[p].ex_inotjarr, null[p].ex_comutarr)
+
+                #if null[p].ex_correlations[i,j] < 6.635:
+
+                corrlist[p].append((i,j, relist[p].ex_correlations[i,j], 
+                                    relist[p].ex_zscores[i,j], relist[p].ex_zscores[j,i], 
+                                    null[p].ex_correlations[i,j], g))
+                    
+                print('{0} {1} {2:.1f} {3:.1f} {4:.1f} ; {5:.1f}; {6:.1f}'.format(*corrlist[p][-1]))
+        
+        return relist
+                                     
 
 
     def writeReadsMutations(self, outputfile):
@@ -1167,7 +1197,7 @@ if __name__=='__main__':
         
         profiles = EM.computeNormalizedReactivities()
 
-        relist = EM.computeRINGs2(window=3, verbal=args.suppressverbal, 
+        relist = EM.computeRINGs4(window=3, verbal=args.suppressverbal, 
                                   bgfile=args.untreated_parsed, subtractwindow=args.subwindow)
         
         for i,model in enumerate(relist):
