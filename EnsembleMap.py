@@ -818,8 +818,9 @@ class EnsembleMap(object):
 
  
 
-    def computeRINGs2(self, window=1, corrtype='apc', bgfile=None, verbal=True, subtractwindow=False):
-        """Sample reads stochastically and return RINGexperiment objects for each model"""
+    def _sample_RINGs(self, window=1, corrtype='apc', bgfile=None, verbal=True, subtractwindow=False):
+        """Assign sample reads based on posterior prob and return 
+        RINGexperiment objects for each model"""
         
         # setup the activestatus mask
         activestatus = np.zeros(self.seqlen, dtype=np.int8)
@@ -828,7 +829,7 @@ class EnsembleMap(object):
     
         # fill in the matrices
         read, comut, inotj = aFunc.fillRINGMatrix(self.reads, self.mutations, activestatus,
-                                                   self.BMsolution.mu, self.BMsolution.p, window, subtractwindow)
+                                                  self.BMsolution.mu, self.BMsolution.p, window, subtractwindow)
 
         relist = [] 
         
@@ -863,7 +864,7 @@ class EnsembleMap(object):
         return relist
 
  
-    def computeRINGsNull(self, window=1, corrtype='g', verbal=True, subtractwindow=False):
+    def _null_RINGs(self, window=1, corrtype='g', verbal=True, subtractwindow=False):
         """Sample reads stochastically and return RINGexperiment objects for each model"""
         
         from SynBernoulliMixture import SynBernoulliMixture
@@ -974,11 +975,11 @@ class EnsembleMap(object):
 
 
 
-    def computeRINGs4(self, window=1, bgfile=None, verbal=True, subtractwindow=False, writeFile=None):
+    def computeRINGs(self, window=1, bgfile=None, verbal=True, subtractwindow=False, writeFile=None):
         """Sample reads stochastically and return RINGexperiment objects for each model"""
         
         # compute rings from experimental data
-        relist = self.computeRINGs2(window=window, verbal=verbal, bgfile=bgfile, subtractwindow=subtractwindow) 
+        relist = self._sample_RINGs(window=window, verbal=verbal, bgfile=bgfile, subtractwindow=subtractwindow) 
         
         if writeFile is None:
             return relist
@@ -986,7 +987,7 @@ class EnsembleMap(object):
         OUT = open(writeFile, 'w')
 
         # compute correlations from null model (clustering only w/o correlations)
-        null = self.computeRINGsNull(window=window, verbal=verbal, subtractwindow=subtractwindow)
+        null = self._null_RINGs(window=window, verbal=verbal, subtractwindow=subtractwindow)
 
         corrlist = []
 
@@ -995,6 +996,7 @@ class EnsembleMap(object):
             
             corrlist.append([])
             OUT.write('*'*40+'\n')
+            
             for i,j in relist[p].significantCorrelations('ex',20):
                 
                 g = newG(i,j, relist[p].ex_readarr, relist[p].ex_inotjarr, relist[p].ex_comutarr, 
@@ -1203,7 +1205,7 @@ if __name__=='__main__':
         
         profiles = EM.computeNormalizedReactivities()
 
-        relist = EM.computeRINGs4(window=3, verbal=args.suppressverbal, writeFile=args.outputprefix+'-null.txt',
+        relist = EM.computeRINGs(window=3, verbal=args.suppressverbal, writeFile=args.outputprefix+'-null.txt',
                                   bgfile=args.untreated_parsed, subtractwindow=True) #args.subwindow)
         
         for i,model in enumerate(relist):
