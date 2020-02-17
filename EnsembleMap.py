@@ -974,12 +974,17 @@ class EnsembleMap(object):
 
 
 
-    def computeRINGs4(self, window=1, bgfile=None, verbal=True, subtractwindow=False):
+    def computeRINGs4(self, window=1, bgfile=None, verbal=True, subtractwindow=False, writeFile=None):
         """Sample reads stochastically and return RINGexperiment objects for each model"""
         
         # compute rings from experimental data
         relist = self.computeRINGs2(window=window, verbal=verbal, bgfile=bgfile, subtractwindow=subtractwindow) 
         
+        if writeFile is None:
+            return relist
+
+        OUT = open(writeFile, 'w')
+
         # compute correlations from null model (clustering only w/o correlations)
         null = self.computeRINGsNull(window=window, verbal=verbal, subtractwindow=subtractwindow)
 
@@ -989,7 +994,7 @@ class EnsembleMap(object):
         for p in range(len(relist)):
             
             corrlist.append([])
-            
+            OUT.write('*'*40+'\n')
             for i,j in relist[p].significantCorrelations('ex',20):
                 
                 g = newG(i,j, relist[p].ex_readarr, relist[p].ex_inotjarr, relist[p].ex_comutarr, 
@@ -1000,9 +1005,10 @@ class EnsembleMap(object):
                 corrlist[p].append((i,j, relist[p].ex_correlations[i,j], 
                                     relist[p].ex_zscores[i,j], relist[p].ex_zscores[j,i], 
                                     null[p].ex_correlations[i,j], g))
-                    
-                print('{0} {1} {2:.1f} {3:.1f} {4:.1f} ; {5:.1f}; {6:.1f}'.format(*corrlist[p][-1]))
+                
+                OUT.write('{0} {1} {2:.1f} {3:.1f} {4:.1f} ; {5:.1f}; {6:.1f}\n'.format(*corrlist[p][-1]))
         
+        OUT.close()
         return relist
                                      
 
@@ -1197,8 +1203,8 @@ if __name__=='__main__':
         
         profiles = EM.computeNormalizedReactivities()
 
-        relist = EM.computeRINGs4(window=3, verbal=args.suppressverbal, 
-                                  bgfile=args.untreated_parsed, subtractwindow=args.subwindow)
+        relist = EM.computeRINGs4(window=3, verbal=args.suppressverbal, writeFile=args.outputprefix+'-null.txt',
+                                  bgfile=args.untreated_parsed, subtractwindow=True) #args.subwindow)
         
         for i,model in enumerate(relist):
             model.computeCorrelationMatrix(verbal=args.suppressverbal, corrbuffer=6)
