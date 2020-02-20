@@ -266,10 +266,7 @@ class ConvergenceMonitor(object):
 
         
             
-
-
-
-        
+##############################################################################################
 
 
 
@@ -280,7 +277,7 @@ class BernoulliMixture(object):
 
     def __init__(self, pdim = None, mudim = None, p_initial=None, mu_initial=None,
                  active_columns = None, inactive_columns = None, idxmap = None,
-                 priorA=2, priorB=2):
+                 priorA=1, priorB=1):
         """Flexibly initialize BM object
         pdim             = dimension of the p vector -- i.e. number of model components
         mudim            = dimension of the mu vector -- i.e. number of data columns
@@ -316,10 +313,8 @@ class BernoulliMixture(object):
             self.initMu()
         
         if self.pdim is not None and self.mudim is not None:
-            self.setConstantPriors(priorA, priorB)
+            self.setPriors(priorA, priorB)
         
-        self.dynamicprior = False
-
         self.p = None
         self.mu = None
         self.p_err = None
@@ -406,7 +401,7 @@ class BernoulliMixture(object):
 
     
 
-    def setConstantPriors(self, priorA, priorB):
+    def setPriors(self, priorA, priorB):
         """set the beta priors
         priorA and priorB can be int or arraylike
         """
@@ -430,24 +425,6 @@ class BernoulliMixture(object):
         self.converged = False
 
     
-
-    def setDynamicPriors(self, weight, readdepth, baserate):
-
-        if not 0<weight<=1:
-            raise ValueError('DynamicPrior weight = {} is invalid, must be 0< <=1'.format(weight))
-        
-        if baserate.shape[0] != self.mudim:
-            raise ValueError('Baserate dimension={0} does not match mudim={1}'.format(baserate.shape[0], self.mudim))
-
-        #self.dynamic_weight = weight
-        #self.dynamic_baserate = baserate
-
-        self.priorA = baserate*readdepth*weight*np.ones((self.pdim, self.mudim))+1
-        self.priorB = np.ones((self.pdim, self.mudim))+1
-
-        #self.dynamicprior = True
-        
-
 
     def compute1ComponentModel(self, reads, mutations):
         
@@ -498,24 +475,11 @@ class BernoulliMixture(object):
     def maximization(self, reads, mutations, W):
         
         accessoryFunctions.maximizeP(self.p, W)
-        
-        if self.dynamicprior:
-            self.updateDynamicPrior(reads.shape[0])
-            
             
         accessoryFunctions.maximizeMu(self.mu, W, reads, mutations, 
                                       self.active_columns, self.priorA, self.priorB)
         
     
-
-
-    def updateDynamicPrior(self, numreads):
-    
-        totalweight = self.dynamic_weight*numreads*self.p.reshape((-1,1))
-        self.priorA = totalweight*self.dynamic_baserate+1
-        self.priorB = totalweight*(1-self.dynamic_baserate)+1
-        
-
 
     def fitEM(self, reads, mutations, maxiterations = 1000, convergeThresh=1e-4, verbal=False, **kwargs):
         """Fit model to data using EM 

@@ -118,10 +118,20 @@ class EnsembleMap(object):
 
         self.reads = reads
         self.mutations = mutations
-        
+           
         self.numreads = self.reads.shape[0]
         
+        self.checkDataIntegrity()
+
  
+    def checkDataIntegrity(self):
+        """Check the reads and mutations conform to expected format"""
+        
+        for n in xrange(self.numreads):
+            mask = np.array(self.mutations[n,:], dtype=bool)
+            if np.sum(self.reads[n,mask]) != np.sum(mask):
+                print('WARNING!!! Read and mutation arrays do not agree at read {}'.format(n))
+
 
 
     def computeBGprofile(self, untfilename, verbal=True, **kwargs):
@@ -391,7 +401,7 @@ class EnsembleMap(object):
 
 
     def fitEM(self, components, trials=5, soln_termcount=3, badcolcount0=2, badcolcount=5, 
-              priorWeight=-1, verbal=False, writeintermediate=None, **kwargs):
+              priorWeight=0.001, verbal=False, writeintermediate=None, **kwargs):
         """Fit Bernoulli Mixture model of a specified number of components.
         Trys a number of random starting conditions. Terminates after finding a 
         repeated valid solution, a repeated set of 'invalid' column solutions, 
@@ -403,7 +413,7 @@ class EnsembleMap(object):
         badcolcount0 = inactivate columns after this many failures with no valid solns
         badcolcount  = inactivate columns after this many failures (with valid solns)
         
-        priorWeight = weight of dynamic prior used during fitting. If -1, disable
+        priorWeight = weight of relative prior used during fitting. If -1, disable
 
         writeintermediate = write out each BM soln to specified prefix
         verbal = T/F on whether to print results of each trial
@@ -446,9 +456,12 @@ class EnsembleMap(object):
                                   inactive_columns=self.inactive_columns, 
                                   idxmap=self.ntindices)
             
-            # set up the prior
+            # set the prior relative to expected background rate and read depth
+            # leave priorB=1
+            # (defaults used within BernoulliMixture are A=1, B=1)
             if priorWeight > 0:
-                BM.setDynamicPriors(priorWeight, np.sum(self.reads, axis=0), self.profile.backprofile)
+                BM.setPriors(priorWeight*self.profile.backprofile*np.sum(self.reads, axis=0), 1)
+
 
             # fit the BM
             BM.fitEM(self.reads, self.mutations, verbal=verbal, **kwargs)
@@ -818,18 +831,27 @@ class EnsembleMap(object):
 
  
 
-    def _sample_RINGs(self, window=1, corrtype='apc', bgfile=None, verbal=True, subtractwindow=False):
-        """Assign sample reads based on posterior prob and return 
-        RINGexperiment objects for each model"""
+    def _sample_RINGs(self, window=1, corrtype='apc', bgfile=None, assignprob=0.9, verbal=True):
+        """Assign sample reads based on posterior prob and return list of RINGexperiment objs
+        window     = correlation window
+        corrtype   = metric for computing correlations
+        bgfile     = parsed mutation file for bg sample (to filter out bg mutations)
+        assignprob = posterior prob. used for assigning reads to models
+        verbal     = verbal"""
+
         
         # setup the activestatus mask
         activestatus = np.zeros(self.seqlen, dtype=np.int8)
         activestatus[self.active_columns] = 1
         activestatus[self.inactive_columns] = 1
-    
+     
+        if verbal:
+            print('Using {:.3f} as posterior prob for sample RING read assignment'.format(assignprob))
+
+
         # fill in the matrices
         read, comut, inotj = aFunc.fillRINGMatrix(self.reads, self.mutations, activestatus,
-                                                  self.BMsolution.mu, self.BMsolution.p, window, subtractwindow)
+                                                  self.BMsolution.mu, self.BMsolution.p, window, assignprob)
 
         relist = [] 
         
@@ -847,7 +869,7 @@ class EnsembleMap(object):
             ring.ex_comutarr = comut[p]
             ring.ex_inotjarr = inotj[p]
         
-    
+            # fill bg arrays (only need to do once; copy for >0 models)
             if bgfile is not None:
                 if p==0:
                     ring.initDataMatrices('bg', bgfile, window=window, 
@@ -857,22 +879,28 @@ class EnsembleMap(object):
                     ring.bg_comutarr = relist[0].bg_comutarr
                     ring.bg_inotjarr = relist[0].bg_inotjarr
 
-            ring.computeCorrelationMatrix()
+            ring.computeCorrelationMatrix(verbal=verbal)
 
             relist.append(ring)
 
         return relist
 
  
-    def _null_RINGs(self, window=1, corrtype='g', verbal=True, subtractwindow=False):
-        """Sample reads stochastically and return RINGexperiment objects for each model"""
-        
+    def _null_RINGs(self, window=1, corrtype='g', assignprob=0.9, verbal=True):
+        """Create null (uncorrelated) model and assign reads based on posterior prob 
+        to determine null-model correlations. 
+        Returns list of RINGexperiment objs
+        window     = correlation window
+        corrtype   = metric for computing correlations
+        bgfile     = parsed mutation file for bg sample (to filter out bg mutations)
+        assignprob = posterior prob. used for assigning reads to models
+        verbal     = verbal"""
+
+       
         from SynBernoulliMixture import SynBernoulliMixture
         
         # initialize synthetic model
-        null_model = SynBernoulliMixture(p=self.BMsolution.p, 
-                                         mu=self.BMsolution.mu,
-                                         bgrate=self.profile.backprofile)
+        null_model = SynBernoulliMixture(p=self.BMsolution.p, mu=self.BMsolution.mu)
         
         # generate synthetic reads 
         nullEM = null_model.generateEMobject(self.reads.shape[0], nodata=0.0, verbal=False)
@@ -883,8 +911,11 @@ class EnsembleMap(object):
         activestatus[self.active_columns] = 1
         activestatus[self.inactive_columns] = 1
         
+        if verbal:
+            print('Using {:.3f} as posterior prob for null RING read assignment'.format(assignprob))
+
         read, comut, inotj = aFunc.fillRINGMatrix(nullEM.reads, nullEM.mutations, activestatus,
-                                                  self.BMsolution.mu, self.BMsolution.p, window, subtractwindow)
+                                                  self.BMsolution.mu, self.BMsolution.p, window, assignprob)
 
         relist = []
 
@@ -909,110 +940,48 @@ class EnsembleMap(object):
         return relist
 
 
-    def computeRINGs3(self, window=1, corrtype='apc', bgfile=None, verbal=True, subtractwindow=False):
-        """Sample reads stochastically and return RINGexperiment objects for each model"""
-        
-        from SynBernoulliMixture import SynBernoulliMixture
-        
-        # initialize synthetic model
-        null_model = SynBernoulliMixture(p=self.BMsolution.p, 
-                                         mu=self.BMsolution.mu,
-                                         bgrate=self.profile.backprofile)
-        
-        # generate synthetic reads 
-        nullEM = null_model.generateEMobject(self.reads.shape[0], nodata=0.0, verbal=False)
-        
 
-        # setup the activestatus mask
-        activestatus = np.zeros(self.seqlen, dtype=np.int8)
-        activestatus[self.active_columns] = 1
-        activestatus[self.inactive_columns] = 1
-        
-        null_read, null_comut, null_inotj = aFunc.fillRINGMatrix(nullEM.reads, nullEM.mutations, activestatus,
-                                                                  self.BMsolution.mu, self.BMsolution.p, window, subtractwindow)
+    def computeRINGs(self, window=1, bgfile=None, assignprob=0.9, verbal=True):
+        """Compute RINGs based on posterior prob and mask out (i,j) pairs that are
+        observed in null (uncorrelated) model. 
+        Return list of RINGexperiment objects
+
+        window     = correlation window
+        corrtype   = metric for computing correlations
+        bgfile     = parsed mutation file for bg sample (to filter out bg mutations)
+        assignprob = posterior prob. used for assigning reads to models
+        verbal     = verbal"""
 
 
-        # fill in the matrices
-        read, comut, inotj = aFunc.fillRINGMatrix(self.reads, self.mutations, activestatus,
-                                                   self.BMsolution.mu, self.BMsolution.p, window, subtractwindow)
-        
-        corrlist = []
-        # populate RINGexperiment objects
-        for p in xrange(self.BMsolution.pdim):
-            
-            corrlist.append([])
-
-            ring = RINGexperiment(arraysize = self.seqlen,
-                                  corrtype = corrtype,
-                                  verbal = verbal)
-
-            ring.sequence = self.sequence
-
-            ring.window = window
-            ring.ex_readarr = read[p]
-            ring.ex_comutarr = comut[p]
-            ring.ex_inotjarr = inotj[p]
-            
-            ring.computeCorrelationMatrix()
-
-            print '-'*50
-
-            for i in xrange(self.seqlen):
-                for j in xrange(i+6, self.seqlen):
-                    
-                    corr = ring._mistatistic(read[p,i,j], inotj[p,i,j], inotj[p,j,i], comut[p,i,j])
-                    null_corr = ring._mistatistic(null_read[p,i,j], null_inotj[p,i,j], null_inotj[p,j,i], null_comut[p,i,j])
-
-                    g = newG(i,j, read[p], inotj[p], comut[p], null_read[p], null_inotj[p], null_comut[p])
-                    if corr>20 and null_corr<6.635: # and g>20:
-
-                        corrlist[p].append((i,j, corr, ring.ex_correlations[i,j], null_corr, g, inotj[p,i,j]/float(read[p,i,j]), inotj[p,j,i]/float(read[p,i,j])))
-                        
-                        print('{0} {1} {2:.1f} {3:.1f} ; {4:.1f} ; {5:.1f} ; {6:.3f} {7:.3f}'.format(*corrlist[p][-1]))
-
-        return corrlist
-
-
-
-
-    def computeRINGs(self, window=1, bgfile=None, verbal=True, subtractwindow=False, writeFile=None):
-        """Sample reads stochastically and return RINGexperiment objects for each model"""
-        
         # compute rings from experimental data
-        relist = self._sample_RINGs(window=window, verbal=verbal, bgfile=bgfile, subtractwindow=subtractwindow) 
+        sample = self._sample_RINGs(window=window, bgfile=bgfile, assignprob=assignprob, verbal=verbal) 
         
-        if writeFile is None:
-            return relist
-
-        OUT = open(writeFile, 'w')
-
         # compute correlations from null model (clustering only w/o correlations)
-        null = self._null_RINGs(window=window, verbal=verbal, subtractwindow=subtractwindow)
-
-        corrlist = []
+        null = self._null_RINGs(window=window, assignprob=assignprob, verbal=verbal)
 
         # iterate through each model and mask out corrs present in the null model
-        for p in range(len(relist)):
+        for p in range(self.BMsolution.pdim):
             
-            corrlist.append([])
-            OUT.write('*'*40+'\n')
-            
-            for i,j in relist[p].significantCorrelations('ex',20):
-                
-                g = newG(i,j, relist[p].ex_readarr, relist[p].ex_inotjarr, relist[p].ex_comutarr, 
-                         null[p].ex_readarr, null[p].ex_inotjarr, null[p].ex_comutarr)
+            sample_p = sample[p]
+            null_p = null[p]
 
-                #if null[p].ex_correlations[i,j] < 6.635:
-
-                corrlist[p].append((i,j, relist[p].ex_correlations[i,j], 
-                                    relist[p].ex_zscores[i,j], relist[p].ex_zscores[j,i], 
-                                    null[p].ex_correlations[i,j], g))
+            for i,j in null_p.significantCorrelations('ex', 10.828): #p=0.001 level
                 
-                OUT.write('{0} {1} {2:.1f} {3:.1f} {4:.1f} ; {5:.1f}; {6:.1f}\n'.format(*corrlist[p][-1]))
-        
-        OUT.close()
-        return relist
+                if verbal and sample_p.ex_correlations[i,j] > 20:
+                    outstr='Model {}: Correlated pair ({},{}) w/ chi2={:.1f} ignored \
+                            : correlated in NULL w/ chi2={.1f}'.\
+                            format(p,i+1,j+1, sample_p.ex_correlations[i,j], null_p.ex_correlations[i,j])
+                    print(outstr)
+
+                sample_p.ex_correlations[i,j] = np.ma.masked
+                sample_p.ex_correlations[j,i] = np.ma.masked
+                sample_p.ex_zscores[i,j] = np.ma.masked
+                sample_p.ex_zscores[j,i] = np.ma.masked
+
+
+        return sample
                                      
+
 
 
     def writeReadsMutations(self, outputfile):
@@ -1031,29 +1000,6 @@ class EnsembleMap(object):
 
     
 ####################################################################################
-
-def newG(i,j, read, inotj, comut, null_read, null_inotj, null_comut):
-
-    a = float(read[i,j]-inotj[i,j]-inotj[j,i]-comut[i,j])
-    null_a = float(null_read[i,j]-null_inotj[i,j]-null_inotj[j,i]-null_comut[i,j])
-    
-    if read[i,j] == 0 or null_read[i,j] == 0:
-        return 0
-    
-    g=0
-    if a>0 and null_a>0:
-        g += a*np.log( (a/read[i,j]) / (null_a/null_read[i,j]) )
-    if inotj[i,j] > 0 and null_inotj[i,j] > 0:
-        g += inotj[i,j]*np.log( (float(inotj[i,j])/read[i,j]) / (float(null_inotj[i,j])/null_read[i,j]) )
-    if inotj[j,i] > 0 and null_inotj[j,i] > 0:
-        g += inotj[j,i]*np.log( (float(inotj[j,i])/read[i,j]) / (float(null_inotj[j,i])/null_read[i,j]) )
-    if comut[i,j] >0 and null_comut[i,j] > 0:
-        g += comut[i,j]*np.log( (float(comut[i,j])/read[i,j]) / (float(null_comut[i,j])/null_read[i,j]) )
-    
-    return 2*g
-
-
-
 
 
 
@@ -1102,7 +1048,8 @@ def parseArguments():
     ringopt.add_argument('--window', type=int, default=1, help='Window size for computing correlations (default=1)')
 
     ringopt.add_argument('--pairmap', action='store_true', help='Run PAIR-MaP analysis on clustered reads') 
-
+    ringopt.add_argument('--readprob_cut', type=float, default=0.9, help='Posterior probability cutoff for assigning reads for inclusion in ring/pairmap analysis. Reads must have posterior prob greater than the cutoff (default=0.9)')
+    ringopt.add_argument('--chisq_cut', type=float, default=20.0, help="Set chisq cutoff for RING/PAIR-MaP analysis (default = 20)")
 
     ############################################################
     # Other options
@@ -1113,7 +1060,6 @@ def parseArguments():
     optional.add_argument('--suppressverbal', action='store_false', help='Suppress verbal output')
     optional.add_argument('--outputprefix', type=str, default='emfit', help='Write output files with this prefix (default=emfit)')
     
-    optional.add_argument('--subwindow', action='store_true', help='Subtract window when doing RING calcs')
 
     parser._action_groups.append(optional)
 
@@ -1191,13 +1137,12 @@ if __name__=='__main__':
 
     if args.ring:
 
-        relist = EM.computeRINGs2(window=args.window, verbal=args.suppressverbal,
-                                  bgfile=args.untreated_parsed, subtractwindow=args.subwindow)
-        
+        RE_list = EM.computeRINGs(window=args.window, bgfile=args.untreated_parsed, 
+                                  assignprob=args.readprob_cut, verbal=args.suppressverbal)
 
-        for i,model in enumerate(relist):
-            model.computeCorrelationMatrix(verbal=args.suppressverbal)
-            model.writeCorrelations('{0}-{1}-rings.txt'.format(args.outputprefix, i))
+        for i,model in enumerate(RE_list):
+            model.writeCorrelations('{0}-{1}-rings.txt'.format(args.outputprefix, i),
+                                    chi2cut=args.chisq_cut)
 
 
 
@@ -1205,17 +1150,17 @@ if __name__=='__main__':
         
         profiles = EM.computeNormalizedReactivities()
 
-        relist = EM.computeRINGs(window=3, verbal=args.suppressverbal, writeFile=args.outputprefix+'-null.txt',
-                                  bgfile=args.untreated_parsed, subtractwindow=True) #args.subwindow)
-        
-        for i,model in enumerate(relist):
-            model.computeCorrelationMatrix(verbal=args.suppressverbal, corrbuffer=6)
+        RE_list = EM.computeRINGs(window=3, bgfile=args.untreated_parsed, 
+                                  assignprob=args.readprob_cut, verbal=args.suppressverbal)
+
+        for i,model in enumerate(RE_list):
             
-            model.writeCorrelations('{0}-{1}-allcorrs.txt'.format(args.outputprefix,i), chi2cut=20)
+            model.writeCorrelations('{0}-{1}-allcorrs.txt'.format(args.outputprefix,i), 
+                                    chi2cut=args.chisq_cut)
 
             pairs = PairMapper(model, profiles[i])
             pairs.writePairs('{0}-{1}-pairmap.txt'.format(args.outputprefix, i))
-            pairs.writePairBonusFile('{0}-{1}-pairmap.bp'.format(args.outputprefix, i), 20, fileformat=1)      
+            pairs.writePairBonusFile('{0}-{1}-pairmap.bp'.format(args.outputprefix, i))      
 
 
             

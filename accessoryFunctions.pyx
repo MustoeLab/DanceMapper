@@ -1,14 +1,12 @@
-#cython: boundscheck=False, wraparound=False, nonecheck=False, cdivision=True
+#cython: boundscheck=False, wraparound=False, nonecheck=False, cdivision=True, language_level=2
 
 from libc.math cimport log, exp
 from libc.stdio cimport FILE, fopen, fclose, getline, printf, fflush, stdout
 
-import time
 import numpy as np
 cimport numpy as np
 
 from readMutStrings cimport READ, parseLine, fillReadMut, incrementArrays
-from dSFMT cimport dsfmt_t, dsfmt_init_gen_rand, dsfmt_genrand_close_open
 
 
 ###########################################################################
@@ -269,7 +267,7 @@ def maximizeMu(double[:,::1] mu, double[:,::1] readWeights,
     for d in xrange(modeldim):
         for j in xrange(actlen):
             col = activecols[j]
-            mu[d,col] = priorA[d,col]-1
+            mu[d,col] = priorA[d,col]
 
     # initialize denominator with priors
     cdef double[:,::1] positionweight = np.zeros((modeldim, actlen))
@@ -277,7 +275,7 @@ def maximizeMu(double[:,::1] mu, double[:,::1] readWeights,
     for d in xrange(modeldim):
         for j in xrange(actlen):
             col = activecols[j]
-            positionweight[d,j] = priorA[d,col]+priorB[d,col]-2
+            positionweight[d,j] = priorA[d,col]+priorB[d,col]
     
     # accumulate numerator and denominator
     for d in xrange(modeldim):
@@ -306,8 +304,9 @@ def maximizeMu(double[:,::1] mu, double[:,::1] readWeights,
 
 
 def fillRINGMatrix(char[:,::1] reads, char[:,::1] mutations, char[:] activestatus,
-                   double[:,::1] mu, double[:] p, int window, int subtractwindow): 
-    """active status is array continaing 0/1 whether or not column is active"""
+                   double[:,::1] mu, double[:] p, int window, double assignprob): 
+    """active status is array containing 0/1 whether or not column is to be included 
+    posterior prob calculations"""
     
 
     # initialize RING matrices
@@ -321,28 +320,23 @@ def fillRINGMatrix(char[:,::1] reads, char[:,::1] mutations, char[:] activestatu
 
     cdef int pdim = p.shape[0]
 
-    # setup the random number generator
-    cdef dsfmt_t dsfmt
-    dsfmt_init_gen_rand(&dsfmt, np.uint32(time.time()))
-
     # compute logp
     cdef double[:] logp = np.log(p)
     
     # compute logmu and clogmu
     cdef double[:,::1] logmu = np.zeros((mu.shape[0], mu.shape[1]))
     cdef double[:,::1] clogmu = np.zeros((mu.shape[0], mu.shape[1]))
-    
     for i in xrange(pdim):
         for j in xrange(mu.shape[1]):
-            if mu[i,j] > 0: # since we are going over all cols (not just active) need to check
+            if mu[i,j] > 0:
                 logmu[i,j] = log( mu[i,j] )
                 clogmu[i,j] = log( 1-mu[i,j] )
     
 
     # declare other needed containers
     cdef double[:] loglike = np.empty(pdim) # container for read loglike of each model
-    cdef double[:] ll_i = np.empty(pdim) # continer for loglike subtracting i
-    cdef double[:] ll_ij = np.empty(pdim) # continer for loglike subtracting i & j
+    cdef double[:] ll_i = np.empty(pdim) # container for loglike subtracting i
+    cdef double[:] ll_ij = np.empty(pdim) # container for loglike subtracting i & j
     cdef double[:] weights = np.empty(pdim) # container for normalized probabilties
     
     # codes for contigency table
@@ -368,25 +362,14 @@ def fillRINGMatrix(char[:,::1] reads, char[:,::1] mutations, char[:] activestatu
             icode = _computeMutCode(reads[n,:], mutations[n,:], i, window)
             if icode < 0: continue
             
-            # subtract i
+            # reset ll_i
             for m in xrange(pdim):
                 ll_i[m] = loglike[m]
-
-            if subtractwindow:
-                _subtractloglike(ll_i, i, window, reads[n,:], mutations[n,:], activestatus, logmu, clogmu)
             
-            # compute weight of read ignoring i
-            _loglike2prob(ll_i, weights)
+            # subtract window i
+            _subtractloglike(ll_i, i, window, reads[n,:], mutations[n,:], activestatus, logmu, clogmu)
+           
 
-            # increment the diagonal for keeping track of overall mutation rate
-            for m in xrange(pdim):
-                if dsfmt_genrand_close_open(&dsfmt) <= weights[m]:
-                    read_arr[m,i,i] += 1
-                    if icode==1:
-                        comut_arr[m,i,i] += 1
-
-
-            # iterate through all pairs
             for j in xrange(i+1, read_arr.shape[1]-window+1):
 
                 jcode = _computeMutCode(reads[n,:], mutations[n,:], j, window)
@@ -397,8 +380,7 @@ def fillRINGMatrix(char[:,::1] reads, char[:,::1] mutations, char[:] activestatu
                     ll_ij[m] = ll_i[m]
                 
                 # subtract j
-                if subtractwindow:
-                    _subtractloglike(ll_ij, j, window, reads[n,:], mutations[n,:], activestatus, logmu, clogmu)
+                _subtractloglike(ll_ij, j, window, reads[n,:], mutations[n,:], activestatus, logmu, clogmu)
                 
                 # compute weight of read ignoring i & j
                 _loglike2prob(ll_ij, weights) 
@@ -408,9 +390,10 @@ def fillRINGMatrix(char[:,::1] reads, char[:,::1] mutations, char[:] activestatu
                 for m in xrange(pdim):
                     
                     # add the read
-                    if weights[m] > 0.9:
-                    #if dsfmt_genrand_close_open(&dsfmt) <= weights[m]:
+                    if weights[m] > assignprob:
+                        
                         read_arr[m,i,j] += 1
+            
                         if icode == 1 and jcode == 1:
                             comut_arr[m,i,j] += 1
                         elif icode == 1 and jcode == 0:
@@ -492,7 +475,7 @@ cdef void readloglike(double[:] loglike, char[:] activestatus, char[:] read, cha
         
         loglike[p] = logp[p]
 
-        for i in xrange(activestatus.shape[0]):
+        for i in xrange(logmu.shape[1]):
 
             if activestatus[i]:
                 if mutation[i]:
@@ -592,7 +575,7 @@ def computeInformationMatrix(double[:] p, double[:,::1] mu, double[:,::1] readWe
     for d in xrange(ppar):
         for j in xrange(mupar):
             col = activecols[j]
-            Imat[idx,idx] += (priorA[d,col]-1)/mu[d,col]**2 + (priorB[d,col]-1)/(1-mu[d,col])**2
+            Imat[idx,idx] += (priorA[d,col])/mu[d,col]**2 + (priorB[d,col])/(1-mu[d,col])**2
             idx+=1
     
     return np.asarray(Imat)

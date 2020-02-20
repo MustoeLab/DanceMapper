@@ -70,7 +70,8 @@ class SynBernoulliMixture():
         if np.abs(1-self.p.sum()) > 1e-8:
             raise AttributeError('Model populations don\'t sum to 1!')
         if self.p.size != self.mu.shape[0]:
-            raise AttributeError('P and mu have inconsistent dimensions: p={0}, mu={1}'.format(self.p.size, self.mu.shape))
+            raise AttributeError('P and mu have inconsistent dimensions: p={0}, mu={1}'.\
+                    format(self.p.size, self.mu.shape))
         
 
         if len(self.correlations) != len(self.p):
@@ -208,6 +209,8 @@ class SynBernoulliMixture():
         
         EM.numreads = num_reads
         EM.reads, EM.mutations = self.generateReads(num_reads, nodata_rate=nodata_rate)
+        
+        EM.checkDataIntegrity()
 
         EM.profile = ReactivityProfile()
         
@@ -218,8 +221,12 @@ class SynBernoulliMixture():
         
         if self.bgrate is not None:
             EM.profile.backprofile = self.bgrate
-            # normalize with DMS false because we don't have sequence info (it doesn't matter anyways)
-            EM.profile.backgroundSubtract(normalize=True, DMS=False) 
+        else:
+            EM.profile.backprofile = np.zeros(self.mu.shape[1])+0.0001
+
+        # normalize with DMS false because we don't have sequence info (it doesn't matter anyways)
+        EM.profile.backgroundSubtract(normalize=True, DMS=False) 
+
 
         if self.active_columns is None or self.inactive_columns is None:
             EM.initializeActiveCols(**kwargs)
@@ -248,8 +255,9 @@ class SynBernoulliMixture():
             for i in range(self.mu.shape[1]):
                 OUT.write('{} '.format(i+1))
                 np.savetxt(OUT, self.mu[sortidx,i], fmt='%.4f', newline=' ')
-                OUT.write('; {0:.4f}\n'.format(self.bgrate[i]))
-
+                if self.bgrate is not None:
+                    OUT.write('; {0:.4f}'.format(self.bgrate[i]))
+                OUT.write('\n')
             
             
             for m in range(len(self.p)):
@@ -261,7 +269,17 @@ class SynBernoulliMixture():
                     OUT.write('{0} {1} {2:.4f} {3:.4f} {4:.4f}\n'.format(c[0]+1, c[1]+1, c[2][3], self.mu[m,c[0]], self.mu[m,c[1]]))
 
     
+    def returnBM(self):
+        """return model as a BernoulliMixture object"""
+        
+        model = BernoulliMixture(pdim=self.p.shape[0], mudim=self.mu.shape[1])
+        
+        model.p = self.p
+        model.mu = self.mu
 
+        return model
+        
+        
 
 
 
