@@ -1,6 +1,6 @@
 
 import numpy as np
-import sys, argparse
+import sys, argparse, itertools
 
 # get path to functions needed for mutstring I/O
 import ringmapperpath
@@ -127,11 +127,13 @@ class EnsembleMap(object):
     def checkDataIntegrity(self):
         """Check the reads and mutations conform to expected format"""
         
+        checksum = 0
         for n in xrange(self.numreads):
             mask = np.array(self.mutations[n,:], dtype=bool)
             if np.sum(self.reads[n,mask]) != np.sum(mask):
-                print('WARNING!!! Read and mutation arrays do not agree at read {}'.format(n))
-
+                raise ValueError('Data integrity failure! Read and mutation arrays do not agree at read {}'.format(n))
+            else:
+                checksum += np.sum(mask)
 
 
     def computeBGprofile(self, untfilename, verbal=True, **kwargs):
@@ -425,6 +427,14 @@ class EnsembleMap(object):
             fitlist     = list of other BernoulliMixture objects
         """
         
+
+        try:
+            if self.profile.backprofile is None:
+                priorWeight = -1
+        except AttributeError:
+            priorWeight = -1
+
+
         if verbal and priorWeight>0:
             print('Using priorWeight={0}'.format(priorWeight))
         
@@ -868,7 +878,7 @@ class EnsembleMap(object):
             ring.ex_readarr = read[p]
             ring.ex_comutarr = comut[p]
             ring.ex_inotjarr = inotj[p]
-        
+            
             # fill bg arrays (only need to do once; copy for >0 models)
             if bgfile is not None:
                 if p==0:
@@ -878,10 +888,17 @@ class EnsembleMap(object):
                     ring.bg_readarr = relist[0].bg_readarr
                     ring.bg_comutarr = relist[0].bg_comutarr
                     ring.bg_inotjarr = relist[0].bg_inotjarr
+            
+            if verbal:
+                print('--------------Computing RINGs : Model {}--------------'.format(p))
 
             ring.computeCorrelationMatrix(verbal=verbal)
+            #ring.writeDataMatrices('ex', 'sample-{}.txt'.format(p))
+
 
             relist.append(ring)
+        
+        if verbal: print('\n')
 
         return relist
 
@@ -922,9 +939,7 @@ class EnsembleMap(object):
         # populate RINGexperiment objects
         for p in xrange(self.BMsolution.pdim):
 
-            ring = RINGexperiment(arraysize = self.seqlen,
-                                  corrtype = corrtype,
-                                  verbal = verbal)
+            ring = RINGexperiment(arraysize = self.seqlen, corrtype = corrtype, verbal = False)
 
             ring.sequence = self.sequence
 
@@ -933,8 +948,8 @@ class EnsembleMap(object):
             ring.ex_comutarr = comut[p]
             ring.ex_inotjarr = inotj[p]
             
-            ring.computeCorrelationMatrix()
-
+            ring.computeCorrelationMatrix(mincount=10)
+            #ring.writeDataMatrices('ex', 'null-{}.txt'.format(p))
             relist.append(ring)
             
         return relist
@@ -951,32 +966,38 @@ class EnsembleMap(object):
         bgfile     = parsed mutation file for bg sample (to filter out bg mutations)
         assignprob = posterior prob. used for assigning reads to models
         verbal     = verbal"""
-
+ 
 
         # compute rings from experimental data
         sample = self._sample_RINGs(window=window, bgfile=bgfile, assignprob=assignprob, verbal=verbal) 
-        
+
         # compute correlations from null model (clustering only w/o correlations)
         null = self._null_RINGs(window=window, assignprob=assignprob, verbal=verbal)
+
 
         # iterate through each model and mask out corrs present in the null model
         for p in range(self.BMsolution.pdim):
             
             sample_p = sample[p]
             null_p = null[p]
+            
+            for i,j in itertools.combinations(range(self.seqlen), 2):
 
-            for i,j in null_p.significantCorrelations('ex', 10.828): #p=0.001 level
+                nullcorr = null_p.ex_correlations[i,j]
+                nulldiff = sample_p.significantDifference(i,j, null_p.ex_readarr[i,j], null_p.ex_inotjarr[i,j],
+                                                          null_p.ex_inotjarr[j,i], null_p.ex_comutarr[i,j])
                 
-                if verbal and sample_p.ex_correlations[i,j] > 20:
-                    outstr='Model {}: Correlated pair ({},{}) w/ chi2={:.1f} ignored \
-                            : correlated in NULL w/ chi2={.1f}'.\
-                            format(p,i+1,j+1, sample_p.ex_correlations[i,j], null_p.ex_correlations[i,j])
-                    print(outstr)
+                # null correlated @ p<0.001 level or not significantly different @ p<1e-6
+                if nullcorr>10.83 or nulldiff<23.9:
+                
+                    if verbal and sample_p.ex_correlations[i,j]>23.9:
+                        outstr='Model {}: Correlated pair ({},{}) w/ chi2={:.1f} ignored: NULL correlation chi2={:.1f} ; NULL difference chi2={:.1f}'.format(p,i+1,j+1, sample_p.ex_correlations[i,j], nullcorr, nulldiff)
+                        print(outstr)
 
-                sample_p.ex_correlations[i,j] = np.ma.masked
-                sample_p.ex_correlations[j,i] = np.ma.masked
-                sample_p.ex_zscores[i,j] = np.ma.masked
-                sample_p.ex_zscores[j,i] = np.ma.masked
+                    sample_p.ex_correlations[i,j] = np.ma.masked
+                    sample_p.ex_correlations[j,i] = np.ma.masked
+                    sample_p.ex_zscores[i,j] = np.ma.masked
+                    sample_p.ex_zscores[j,i] = np.ma.masked
 
 
         return sample
@@ -1049,7 +1070,7 @@ def parseArguments():
 
     ringopt.add_argument('--pairmap', action='store_true', help='Run PAIR-MaP analysis on clustered reads') 
     ringopt.add_argument('--readprob_cut', type=float, default=0.9, help='Posterior probability cutoff for assigning reads for inclusion in ring/pairmap analysis. Reads must have posterior prob greater than the cutoff (default=0.9)')
-    ringopt.add_argument('--chisq_cut', type=float, default=20.0, help="Set chisq cutoff for RING/PAIR-MaP analysis (default = 20)")
+    ringopt.add_argument('--chisq_cut', type=float, default=23.9, help="Set chisq cutoff for RING/PAIR-MaP analysis (default = 23.9)")
 
     ############################################################
     # Other options
@@ -1155,6 +1176,10 @@ if __name__=='__main__':
 
         for i,model in enumerate(RE_list):
             
+            if args.suppressverbal:
+                print('--------------Computing PAIRs : Model {}--------------'.format(p))
+
+
             model.writeCorrelations('{0}-{1}-allcorrs.txt'.format(args.outputprefix,i), 
                                     chi2cut=args.chisq_cut)
 

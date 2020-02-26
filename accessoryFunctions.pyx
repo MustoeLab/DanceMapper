@@ -3,10 +3,12 @@
 from libc.math cimport log, exp
 from libc.stdio cimport FILE, fopen, fclose, getline, printf, fflush, stdout
 
+import time
 import numpy as np
 cimport numpy as np
 
 from readMutStrings cimport READ, parseLine, fillReadMut, incrementArrays
+from dSFMT cimport dsfmt_t, dsfmt_init_gen_rand, dsfmt_genrand_close_open
 
 
 ###########################################################################
@@ -320,6 +322,11 @@ def fillRINGMatrix(char[:,::1] reads, char[:,::1] mutations, char[:] activestatu
 
     cdef int pdim = p.shape[0]
 
+    # setup the random number generator
+    cdef dsfmt_t dsfmt
+    dsfmt_init_gen_rand(&dsfmt, np.uint32(time.time()))
+
+
     # compute logp
     cdef double[:] logp = np.log(p)
     
@@ -368,7 +375,19 @@ def fillRINGMatrix(char[:,::1] reads, char[:,::1] mutations, char[:] activestatu
             
             # subtract window i
             _subtractloglike(ll_i, i, window, reads[n,:], mutations[n,:], activestatus, logmu, clogmu)
-           
+            
+            
+            # compute weight of read ignoring i
+            _loglike2prob(ll_i, weights)
+            
+            # increment the diagonal for keeping track of overall mutation rate
+            for m in xrange(pdim):
+                if (assignprob>=0 and weights[m] >= assignprob) or \
+                        (assignprob<0 and weights[m] >= dsfmt_genrand_close_open(&dsfmt)):
+                    read_arr[m,i,i] += 1
+                    if icode==1:
+                        comut_arr[m,i,i] += 1
+
 
             for j in xrange(i+1, read_arr.shape[1]-window+1):
 
@@ -390,8 +409,9 @@ def fillRINGMatrix(char[:,::1] reads, char[:,::1] mutations, char[:] activestatu
                 for m in xrange(pdim):
                     
                     # add the read
-                    if weights[m] > assignprob:
-                        
+                    if (assignprob>=0 and weights[m] >= assignprob) or \
+                            (assignprob<0 and weights[m] >= dsfmt_genrand_close_open(&dsfmt)):
+                    
                         read_arr[m,i,j] += 1
             
                         if icode == 1 and jcode == 1:
@@ -400,7 +420,11 @@ def fillRINGMatrix(char[:,::1] reads, char[:,::1] mutations, char[:] activestatu
                             inotj_arr[m,i,j] += 1
                         elif icode == 0 and jcode == 1:
                             inotj_arr[m,j,i] += 1
-                        
+    
+
+    # reset cursor to new line
+    printf("\n\n")
+    fflush(stdout)
 
     return read_arr, comut_arr, inotj_arr                                    
 

@@ -212,11 +212,12 @@ class SynBernoulliMixture():
         
         EM.checkDataIntegrity()
 
+        EM.sequence = 'A'*self.mu.shape[1]
         EM.profile = ReactivityProfile()
         
         mutrate = np.sum(EM.mutations, axis=0, dtype=float)
         mutrate /= np.sum(EM.reads, axis=0, dtype=float)
-
+        
         EM.profile.rawprofile = mutrate
         
         if self.bgrate is not None:

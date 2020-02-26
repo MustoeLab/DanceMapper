@@ -693,25 +693,37 @@ class BernoulliMixture(object):
                 minidx = idx
                 mindiff = rmsdiff
 
-        return minidx, mindiff
+        return minidx
 
 
 
-    def modelDifference(self, BM2, func=np.max):
+    def modelDifference(self, BM2, func=np.max, columns='active'):
         """compute the difference between two BM models. 
         The difference is evaluated using func
+        columns can be active, inactive, both (both = active+inactive) 
         """
         
-        if not np.array_equal(self.active_columns, BM2.active_columns) and \
-                len(self.active_columns) < len(BM2.active_columns):
-            actlist = self.active_columns
+        if columns == 'active':
+            if not np.array_equal(self.active_columns, BM2.active_columns) and \
+                    len(self.active_columns) < len(BM2.active_columns):
+                actlist = self.active_columns
+            else:
+                actlist = BM2.active_columns
+        elif columns == 'inactive':
+            if not np.array_equal(self.inactive_columns, BM2.inactive_columns) and \
+                    len(self.inactive_columns) < len(BM2.inactive_columns):
+                actlist = self.inactive_columns
+            else:
+                actlist = BM2.inactive_columns
+        elif columns == 'both':
+            actlist = np.append(self.active_columns, self.inactive_columns)
+            actlist.sort()
         else:
-            actlist = BM2.active_columns
-            #raise ValueError("active_columns of two BernoulliMixture objects are not the same")
-        
-        
+            raise ValueError('Unknown column keyword: {}'.format(columns))
 
-        idx, rmsdiff = self.alignModel(BM2)
+
+
+        idx = self.alignModel(BM2)
         
         d = np.abs(self.mu - BM2.mu[idx,])
         mudiff = func(d[:, actlist])
