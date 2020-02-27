@@ -868,9 +868,7 @@ class EnsembleMap(object):
         # populate RINGexperiment objects
         for p in xrange(self.BMsolution.pdim):
 
-            ring = RINGexperiment(arraysize = self.seqlen,
-                                  corrtype = corrtype,
-                                  verbal = verbal)
+            ring = RINGexperiment(arraysize=self.seqlen, corrtype=corrtype, verbal=verbal)
 
             ring.sequence = self.sequence
 
@@ -892,7 +890,7 @@ class EnsembleMap(object):
             if verbal:
                 print('--------------Computing RINGs : Model {}--------------'.format(p))
 
-            ring.computeCorrelationMatrix(verbal=verbal)
+            ring.computeCorrelationMatrix(verbal=verbal, ignorents=self.invalid_columns)
             #ring.writeDataMatrices('ex', 'sample-{}.txt'.format(p))
 
 
@@ -916,11 +914,15 @@ class EnsembleMap(object):
        
         from SynBernoulliMixture import SynBernoulliMixture
         
-        # initialize synthetic model
-        null_model = SynBernoulliMixture(p=self.BMsolution.p, mu=self.BMsolution.mu)
+        # initialize synthetic model, ensuring that invalid columns are masked out
+        mu = np.copy(self.BMsolution.mu)
+        mu[self.invalid_columns] = -1
+        null_model = SynBernoulliMixture(p=self.BMsolution.p, mu=mu)
         
         # generate synthetic reads 
-        nullEM = null_model.generateEMobject(self.reads.shape[0], nodata=0.0, verbal=False)
+        nullEM = null_model.generateEMobject(self.reads.shape[0], nodata=0.0, 
+                                             invalidcols=self.invalid_columns,
+                                             verbal=True)
  
 
         # setup the activestatus mask
@@ -932,14 +934,14 @@ class EnsembleMap(object):
             print('Using {:.3f} as posterior prob for null RING read assignment'.format(assignprob))
 
         read, comut, inotj = aFunc.fillRINGMatrix(nullEM.reads, nullEM.mutations, activestatus,
-                                                  self.BMsolution.mu, self.BMsolution.p, window, assignprob)
+                                                  mu, self.BMsolution.p, window, assignprob)
 
         relist = []
 
         # populate RINGexperiment objects
         for p in xrange(self.BMsolution.pdim):
 
-            ring = RINGexperiment(arraysize = self.seqlen, corrtype = corrtype, verbal = False)
+            ring = RINGexperiment(arraysize=self.seqlen, corrtype=corrtype, verbal=False)
 
             ring.sequence = self.sequence
 
@@ -948,7 +950,7 @@ class EnsembleMap(object):
             ring.ex_comutarr = comut[p]
             ring.ex_inotjarr = inotj[p]
             
-            ring.computeCorrelationMatrix(mincount=10)
+            ring.computeCorrelationMatrix(mincount=10, ignorents=self.invalid_columns)
             #ring.writeDataMatrices('ex', 'null-{}.txt'.format(p))
             relist.append(ring)
             

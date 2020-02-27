@@ -13,7 +13,8 @@ from ReactivityProfile import ReactivityProfile
 
 class SynBernoulliMixture():
 
-    def __init__(self, p=None, mu=None, bgrate=None, fname=None):
+    def __init__(self, p=None, mu=None, bgrate=None,
+                 active_columns=None, inactive_columns=None, fname=None):
         """p is 1D array with population of each model
         mu is MxN 2D array with Bernoulli probs of each state
         """
@@ -35,8 +36,8 @@ class SynBernoulliMixture():
             self.correlations = []
         
         self.bgrate = bgrate
-        self.active_columns = None
-        self.inactive_columns = None
+        self.active_columns = active_columns
+        self.inactive_columns = inactive_columns
     
 
         if fname is not None:
@@ -50,7 +51,6 @@ class SynBernoulliMixture():
 
         self.p = BM.p
         self.mu = BM.mu
-        self.mu[np.isnan(self.mu)] = -1
 
         self.correlations = [ [] for x in self.p ] 
 
@@ -67,6 +67,11 @@ class SynBernoulliMixture():
             self.mu = np.vstack(self.mu)
             self.p = np.array(self.p)
         
+
+        # make sure all values are defined
+        self.mu[np.isnan(self.mu)] = -1
+
+
         if np.abs(1-self.p.sum()) > 1e-8:
             raise AttributeError('Model populations don\'t sum to 1!')
         if self.p.size != self.mu.shape[0]:
