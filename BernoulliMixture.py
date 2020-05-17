@@ -884,8 +884,11 @@ class BernoulliMixture(object):
                         mu_err.append(errs)
                 
                 except ValueError as e:
-                    if spl[1] == '--' or spl[2+self.pdim] == '--':
+                    if '--' in spl[1:1+self.pdim]:                         
                         mu.append([-1]*self.pdim)
+                        mu_err.append([-1]*self.pdim)
+                    elif '--' in spl[2+self.pdim:2+2*self.pdim]:
+                        mu.append(vals)
                         mu_err.append([-1]*self.pdim)
                     else:
                         raise e

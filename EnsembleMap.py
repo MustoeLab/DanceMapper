@@ -179,7 +179,7 @@ class EnsembleMap(object):
         ###################################
         
         # copy so we don't modify argument
-        invalidcols = invalidcols[:]
+        invalidcols = list(invalidcols[:])
 
         if verbal and len(invalidcols)>0:
             print("Nts {} set invalid by user".format(self.ntindices[invalidcols]))
@@ -841,7 +841,8 @@ class EnsembleMap(object):
 
  
 
-    def _sample_RINGs(self, window=1, corrtype='apc', bgfile=None, assignprob=0.9, verbal=True):
+    def _sample_RINGs(self, window=1, corrtype='apc', bgfile=None, assignprob=0.9, 
+                      subtractwindow=True, montecarlo=False, verbal=True):
         """Assign sample reads based on posterior prob and return list of RINGexperiment objs
         window     = correlation window
         corrtype   = metric for computing correlations
@@ -860,14 +861,23 @@ class EnsembleMap(object):
 
 
         # fill in the matrices
-        read, comut, inotj = aFunc.fillRINGMatrix(self.reads, self.mutations, activestatus,
-                                                  self.BMsolution.mu, self.BMsolution.p, window, assignprob)
+        if montecarlo:
+            read, comut, inotj = aFunc.fillRINGMatrix_montecarlo(self.reads, self.mutations, activestatus,
+                                                                 self.BMsolution.mu, self.BMsolution.p, 
+                                                                 window, self.reads.shape[0], subtractwindow)
+        
+        else:
+            read, comut, inotj = aFunc.fillRINGMatrix(self.reads, self.mutations, activestatus,
+                                                      self.BMsolution.mu, self.BMsolution.p, window, assignprob, 
+                                                      subtractwindow)
+        
+
 
         relist = [] 
         
         # populate RINGexperiment objects
         for p in xrange(self.BMsolution.pdim):
-
+            
             ring = RINGexperiment(arraysize=self.seqlen, corrtype=corrtype, verbal=verbal)
 
             ring.sequence = self.sequence
@@ -887,11 +897,9 @@ class EnsembleMap(object):
                     ring.bg_comutarr = relist[0].bg_comutarr
                     ring.bg_inotjarr = relist[0].bg_inotjarr
             
-            if verbal:
-                print('--------------Computing RINGs : Model {}--------------'.format(p))
-
             ring.computeCorrelationMatrix(verbal=verbal, ignorents=self.invalid_columns)
-            #ring.writeDataMatrices('ex', 'sample-{}.txt'.format(p))
+            
+            #ring.writeDataMatrices('ex', 't-{}-{}-{}-{}'.format(p,subtractwindow,assignprob,montecarlo))
 
 
             relist.append(ring)
@@ -901,7 +909,9 @@ class EnsembleMap(object):
         return relist
 
  
-    def _null_RINGs(self, window=1, corrtype='g', assignprob=0.9, verbal=True):
+
+    def _null_RINGs(self, window=1, corrtype='g', assignprob=0.9, 
+                    subtractwindow=True, montecarlo=False, verbal=True):
         """Create null (uncorrelated) model and assign reads based on posterior prob 
         to determine null-model correlations. 
         Returns list of RINGexperiment objs
@@ -916,13 +926,13 @@ class EnsembleMap(object):
         
         # initialize synthetic model, ensuring that invalid columns are masked out
         mu = np.copy(self.BMsolution.mu)
-        mu[self.invalid_columns] = -1
+        mu[:,self.invalid_columns] = -1
         null_model = SynBernoulliMixture(p=self.BMsolution.p, mu=mu)
         
         # generate synthetic reads 
-        nullEM = null_model.generateEMobject(self.reads.shape[0], nodata=0.0, 
-                                             invalidcols=self.invalid_columns,
-                                             verbal=True)
+        nullEM = null_model.getEMobject(self.reads.shape[0], nodata=0.1, 
+                                        invalidcols=self.invalid_columns,
+                                        verbal=False)
  
 
         # setup the activestatus mask
@@ -933,8 +943,17 @@ class EnsembleMap(object):
         if verbal:
             print('Using {:.3f} as posterior prob for null RING read assignment'.format(assignprob))
 
-        read, comut, inotj = aFunc.fillRINGMatrix(nullEM.reads, nullEM.mutations, activestatus,
-                                                  mu, self.BMsolution.p, window, assignprob)
+
+        # fill in the matrices
+        if montecarlo:
+            read, comut, inotj = aFunc.fillRINGMatrix_montecarlo(nullEM.reads, nullEM.mutations, activestatus,
+                                                                 mu, self.BMsolution.p, 
+                                                                 window, self.reads.shape[0], subtractwindow)
+        else:
+            read, comut, inotj = aFunc.fillRINGMatrix(nullEM.reads, nullEM.mutations, activestatus,
+                                                      mu, self.BMsolution.p, window, assignprob, 
+                                                      subtractwindow)
+ 
 
         relist = []
 
@@ -958,7 +977,8 @@ class EnsembleMap(object):
 
 
 
-    def computeRINGs(self, window=1, bgfile=None, assignprob=0.9, verbal=True):
+    def computeRINGs(self, window=1, bgfile=None, assignprob=0.9,
+                     subtractwindow=True, montecarlo=False, verbal=True):
         """Compute RINGs based on posterior prob and mask out (i,j) pairs that are
         observed in null (uncorrelated) model. 
         Return list of RINGexperiment objects
@@ -971,10 +991,12 @@ class EnsembleMap(object):
  
 
         # compute rings from experimental data
-        sample = self._sample_RINGs(window=window, bgfile=bgfile, assignprob=assignprob, verbal=verbal) 
+        sample = self._sample_RINGs(window=window, bgfile=bgfile, assignprob=assignprob, 
+                                    subtractwindow=subtractwindow, montecarlo=montecarlo, verbal=verbal) 
 
         # compute correlations from null model (clustering only w/o correlations)
-        null = self._null_RINGs(window=window, assignprob=assignprob, verbal=verbal)
+        null = self._null_RINGs(window=window, assignprob=assignprob, 
+                                subtractwindow=subtractwindow, montecarlo=montecarlo, verbal=verbal) 
 
 
         # iterate through each model and mask out corrs present in the null model

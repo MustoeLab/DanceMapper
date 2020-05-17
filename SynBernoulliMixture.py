@@ -115,7 +115,7 @@ class SynBernoulliMixture():
     
     
     def addCorrelation(self, i, j, modelnum, coupling):
-
+    
         
         i_marg = self.mu[modelnum, i]
         j_marg = self.mu[modelnum, j]
@@ -127,6 +127,7 @@ class SynBernoulliMixture():
                               i_marg - joint,
                               j_marg - joint, 
                               joint])
+        
 
         if min(probarray) < 0 or not np.isclose(probarray.sum(), 1):
             print probarray
@@ -138,7 +139,7 @@ class SynBernoulliMixture():
 
 
 
-    def generateReads(self, num_reads, nodata_rate = 0.05):
+    def generateReads(self, num_reads, nodata_rate = 0.0, savedata=False):
         
         # finalize the model if not done so...
         self.compileModel()       
@@ -189,10 +190,6 @@ class SynBernoulliMixture():
                 muts[mask, corr[0]] = 1
                 muts[mask, corr[1]] = 1
 
-
-                
-
-
         # generate the reads matrix; default is nts are read
         reads = np.ones((num_reads, seqlen), dtype=np.int8)
         
@@ -201,20 +198,34 @@ class SynBernoulliMixture():
         reads[mask] = 0
         muts[mask] = 0
         
+        if savedata:
+            self.readassignments = assignments
+        
         return reads, muts
 
+
+    
+    def getEMobject(self, num_reads, nodata_rate=0.0, savedata=False, **kwargs):
         
+        reads, muts = self.generateReads(num_reads, nodata_rate=nodata_rate, savedata=savedata)
+        
+        EM = self.constructEM(reads, muts, **kwargs)
+        
+        if savedata:
+            self.EM = EM
+
+        return EM
 
 
-    def generateEMobject(self, num_reads, nodata_rate=0.05, **kwargs):
 
-        num_reads = int(num_reads)
+    def constructEM(self, reads, muts, **kwargs):
 
         EM = EnsembleMap(seqlen=self.mu.shape[1])     
         
-        EM.numreads = num_reads
-        EM.reads, EM.mutations = self.generateReads(num_reads, nodata_rate=nodata_rate)
-        
+        EM.numreads = reads.shape[0]
+
+        EM.reads = reads
+        EM.mutations = muts 
         EM.checkDataIntegrity()
 
         EM.sequence = 'A'*self.mu.shape[1]
@@ -239,10 +250,25 @@ class SynBernoulliMixture():
         else:
             EM.setColumns(activecols=self.active_columns, inactivecols=self.inactive_columns)
 
-
         return EM
 
     
+
+
+    def getComponentEMobjects(self):
+        """Return EM objects for reads/mutations from initial assignments"""
+
+        em_list = []       
+        
+        for p in range(len(self.p)):
+            mask = (self.readassignments == p)
+            EM = self.constructEM(self.EM.reads[mask, :], self.EM.mutations[mask, :])
+            em_list.append(EM)
+
+        return em_list
+
+
+
     def writeParams(self, output):
         
         sortidx = range(len(self.p))
@@ -270,7 +296,8 @@ class SynBernoulliMixture():
                 OUT.write('\n# Correlations {}\n'.format(m))
                 
                 corrs = self.correlations[m]
-                corrs.sort()
+                corrs.sort(key=lambda x:x[1])
+                corrs.sort(key=lambda x:x[0])
                 for c in corrs:
                     OUT.write('{0} {1} {2:.4f} {3:.4f} {4:.4f}\n'.format(c[0]+1, c[1]+1, c[2][3], self.mu[m,c[0]], self.mu[m,c[1]]))
 
