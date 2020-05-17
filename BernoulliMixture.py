@@ -45,7 +45,7 @@ class ConvergenceError(Exception):
 class ConvergenceMonitor(object):
     """Object to monitor convergence of EM algorithm"""
 
-    def __init__(self, activecols, convergeThresh=1e-4, maxsteps=1000, initsteps=51):
+    def __init__(self, activecols, convergeThresh=1e-4, maxmu=0.5, maxsteps=1000, initsteps=51):
 
         self.step = 0
         self.lastp = None
@@ -58,6 +58,8 @@ class ConvergenceMonitor(object):
         self.converged = False
         self.iterate = True
         self.error = None
+        
+        self.maxmu = maxmu
 
         self.active_columns = activecols
 
@@ -136,8 +138,9 @@ class ConvergenceMonitor(object):
         if len(lowcolumns)>0:
             raise ConvergenceError('Columns with low Mu', self.step, lowcolumns)
         
+        
         maxvals = np.max(activemu, axis=0)
-        hicolumns = self.active_columns[np.where(maxvals > 0.5)]
+        hicolumns = self.active_columns[np.where(maxvals > self.maxmu)]
         if len(hicolumns)>0:
             raise ConvergenceError('Columns with hi Mu', self.step, hicolumns)
         
@@ -552,9 +555,15 @@ class BernoulliMixture(object):
         # init the parameters
         self.p = np.copy( self.p_initial )
         self.mu = np.copy( self.mu_initial )
+        
+        
+        with np.errstate(divide='ignore',invalid='ignore'):
+            maxmu = np.sum(mutations, axis=0, dtype=float) / np.sum(reads, axis=0)
+        
+        maxmu = 1.2*np.max(maxmu[np.isfinite(maxmu)])
 
-
-        CM = ConvergenceMonitor(self.active_columns, maxsteps=maxiterations, convergeThresh=convergeThresh)
+        CM = ConvergenceMonitor(self.active_columns, maxsteps=maxiterations, convergeThresh=convergeThresh,
+                                maxmu = maxmu)
         
         timestart = time.time()
 
