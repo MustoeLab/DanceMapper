@@ -269,10 +269,7 @@ class ConvergenceMonitor(object):
 
         
             
-
-
-
-        
+##############################################################################################
 
 
 
@@ -283,7 +280,7 @@ class BernoulliMixture(object):
 
     def __init__(self, pdim = None, mudim = None, p_initial=None, mu_initial=None,
                  active_columns = None, inactive_columns = None, idxmap = None,
-                 priorA=2, priorB=2):
+                 priorA=1, priorB=1):
         """Flexibly initialize BM object
         pdim             = dimension of the p vector -- i.e. number of model components
         mudim            = dimension of the mu vector -- i.e. number of data columns
@@ -319,10 +316,8 @@ class BernoulliMixture(object):
             self.initMu()
         
         if self.pdim is not None and self.mudim is not None:
-            self.setConstantPriors(priorA, priorB)
+            self.setPriors(priorA, priorB)
         
-        self.dynamicprior = False
-
         self.p = None
         self.mu = None
         self.p_err = None
@@ -409,7 +404,7 @@ class BernoulliMixture(object):
 
     
 
-    def setConstantPriors(self, priorA, priorB):
+    def setPriors(self, priorA, priorB):
         """set the beta priors
         priorA and priorB can be int or arraylike
         """
@@ -433,24 +428,6 @@ class BernoulliMixture(object):
         self.converged = False
 
     
-
-    def setDynamicPriors(self, weight, readdepth, baserate):
-
-        if not 0<weight<=1:
-            raise ValueError('DynamicPrior weight = {} is invalid, must be 0< <=1'.format(weight))
-        
-        if baserate.shape[0] != self.mudim:
-            raise ValueError('Baserate dimension={0} does not match mudim={1}'.format(baserate.shape[0], self.mudim))
-
-        #self.dynamic_weight = weight
-        #self.dynamic_baserate = baserate
-
-        self.priorA = baserate*readdepth*weight*np.ones((self.pdim, self.mudim))+1
-        self.priorB = np.ones((self.pdim, self.mudim))+1
-
-        #self.dynamicprior = True
-        
-
 
     def compute1ComponentModel(self, reads, mutations):
         
@@ -501,24 +478,11 @@ class BernoulliMixture(object):
     def maximization(self, reads, mutations, W):
         
         accessoryFunctions.maximizeP(self.p, W)
-        
-        if self.dynamicprior:
-            self.updateDynamicPrior(reads.shape[0])
-            
             
         accessoryFunctions.maximizeMu(self.mu, W, reads, mutations, 
                                       self.active_columns, self.priorA, self.priorB)
         
     
-
-
-    def updateDynamicPrior(self, numreads):
-    
-        totalweight = self.dynamic_weight*numreads*self.p.reshape((-1,1))
-        self.priorA = totalweight*self.dynamic_baserate+1
-        self.priorB = totalweight*(1-self.dynamic_baserate)+1
-        
-
 
     def fitEM(self, reads, mutations, maxiterations = 1000, convergeThresh=1e-4, verbal=False, **kwargs):
         """Fit model to data using EM 
@@ -738,25 +702,37 @@ class BernoulliMixture(object):
                 minidx = idx
                 mindiff = rmsdiff
 
-        return minidx, mindiff
+        return minidx
 
 
 
-    def modelDifference(self, BM2, func=np.max):
+    def modelDifference(self, BM2, func=np.max, columns='active'):
         """compute the difference between two BM models. 
         The difference is evaluated using func
+        columns can be active, inactive, both (both = active+inactive) 
         """
         
-        if not np.array_equal(self.active_columns, BM2.active_columns) and \
-                len(self.active_columns) < len(BM2.active_columns):
-            actlist = self.active_columns
+        if columns == 'active':
+            if not np.array_equal(self.active_columns, BM2.active_columns) and \
+                    len(self.active_columns) < len(BM2.active_columns):
+                actlist = self.active_columns
+            else:
+                actlist = BM2.active_columns
+        elif columns == 'inactive':
+            if not np.array_equal(self.inactive_columns, BM2.inactive_columns) and \
+                    len(self.inactive_columns) < len(BM2.inactive_columns):
+                actlist = self.inactive_columns
+            else:
+                actlist = BM2.inactive_columns
+        elif columns == 'both':
+            actlist = np.append(self.active_columns, self.inactive_columns)
+            actlist.sort()
         else:
-            actlist = BM2.active_columns
-            #raise ValueError("active_columns of two BernoulliMixture objects are not the same")
-        
-        
+            raise ValueError('Unknown column keyword: {}'.format(columns))
 
-        idx, rmsdiff = self.alignModel(BM2)
+
+
+        idx = self.alignModel(BM2)
         
         d = np.abs(self.mu - BM2.mu[idx,])
         mudiff = func(d[:, actlist])
@@ -917,8 +893,11 @@ class BernoulliMixture(object):
                         mu_err.append(errs)
                 
                 except ValueError as e:
-                    if spl[1] == '--' or spl[2+self.pdim] == '--':
+                    if '--' in spl[1:1+self.pdim]:                         
                         mu.append([-1]*self.pdim)
+                        mu_err.append([-1]*self.pdim)
+                    elif '--' in spl[2+self.pdim:2+2*self.pdim]:
+                        mu.append(vals)
                         mu_err.append([-1]*self.pdim)
                     else:
                         raise e

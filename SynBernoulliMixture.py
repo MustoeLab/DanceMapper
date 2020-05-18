@@ -13,7 +13,8 @@ from ReactivityProfile import ReactivityProfile
 
 class SynBernoulliMixture():
 
-    def __init__(self, p=None, mu=None, bgrate=None, fname=None):
+    def __init__(self, p=None, mu=None, bgrate=None,
+                 active_columns=None, inactive_columns=None, fname=None):
         """p is 1D array with population of each model
         mu is MxN 2D array with Bernoulli probs of each state
         """
@@ -35,8 +36,8 @@ class SynBernoulliMixture():
             self.correlations = []
         
         self.bgrate = bgrate
-        self.active_columns = None
-        self.inactive_columns = None
+        self.active_columns = active_columns
+        self.inactive_columns = inactive_columns
     
 
         if fname is not None:
@@ -50,7 +51,6 @@ class SynBernoulliMixture():
 
         self.p = BM.p
         self.mu = BM.mu
-        self.mu[np.isnan(self.mu)] = -1
 
         self.correlations = [ [] for x in self.p ] 
 
@@ -67,10 +67,16 @@ class SynBernoulliMixture():
             self.mu = np.vstack(self.mu)
             self.p = np.array(self.p)
         
+
+        # make sure all values are defined
+        self.mu[np.isnan(self.mu)] = -1
+
+
         if np.abs(1-self.p.sum()) > 1e-8:
             raise AttributeError('Model populations don\'t sum to 1!')
         if self.p.size != self.mu.shape[0]:
-            raise AttributeError('P and mu have inconsistent dimensions: p={0}, mu={1}'.format(self.p.size, self.mu.shape))
+            raise AttributeError('P and mu have inconsistent dimensions: p={0}, mu={1}'.\
+                    format(self.p.size, self.mu.shape))
         
 
         if len(self.correlations) != len(self.p):
@@ -109,7 +115,7 @@ class SynBernoulliMixture():
     
     
     def addCorrelation(self, i, j, modelnum, coupling):
-
+    
         
         i_marg = self.mu[modelnum, i]
         j_marg = self.mu[modelnum, j]
@@ -121,6 +127,7 @@ class SynBernoulliMixture():
                               i_marg - joint,
                               j_marg - joint, 
                               joint])
+        
 
         if min(probarray) < 0 or not np.isclose(probarray.sum(), 1):
             print probarray
@@ -132,7 +139,7 @@ class SynBernoulliMixture():
 
 
 
-    def generateReads(self, num_reads, nodata_rate = 0.05):
+    def generateReads(self, num_reads, nodata_rate = 0.0, savedata=False):
         
         # finalize the model if not done so...
         self.compileModel()       
@@ -183,10 +190,6 @@ class SynBernoulliMixture():
                 muts[mask, corr[0]] = 1
                 muts[mask, corr[1]] = 1
 
-
-                
-
-
         # generate the reads matrix; default is nts are read
         reads = np.ones((num_reads, seqlen), dtype=np.int8)
         
@@ -195,41 +198,77 @@ class SynBernoulliMixture():
         reads[mask] = 0
         muts[mask] = 0
         
+        if savedata:
+            self.readassignments = assignments
+        
         return reads, muts
 
+
+    
+    def getEMobject(self, num_reads, nodata_rate=0.0, savedata=False, **kwargs):
         
+        reads, muts = self.generateReads(num_reads, nodata_rate=nodata_rate, savedata=savedata)
+        
+        EM = self.constructEM(reads, muts, **kwargs)
+        
+        if savedata:
+            self.EM = EM
+
+        return EM
 
 
-    def generateEMobject(self, num_reads, nodata_rate=0.05, **kwargs):
 
-        num_reads = int(num_reads)
+    def constructEM(self, reads, muts, **kwargs):
 
         EM = EnsembleMap(seqlen=self.mu.shape[1])     
         
-        EM.numreads = num_reads
-        EM.reads, EM.mutations = self.generateReads(num_reads, nodata_rate=nodata_rate)
+        EM.numreads = reads.shape[0]
 
+        EM.reads = reads
+        EM.mutations = muts 
+        EM.checkDataIntegrity()
+
+        EM.sequence = 'A'*self.mu.shape[1]
         EM.profile = ReactivityProfile()
         
         mutrate = np.sum(EM.mutations, axis=0, dtype=float)
         mutrate /= np.sum(EM.reads, axis=0, dtype=float)
-
+        
         EM.profile.rawprofile = mutrate
         
         if self.bgrate is not None:
             EM.profile.backprofile = self.bgrate
-            # normalize with DMS false because we don't have sequence info (it doesn't matter anyways)
-            EM.profile.backgroundSubtract(normalize=True, DMS=False) 
+        else:
+            EM.profile.backprofile = np.zeros(self.mu.shape[1])+0.0001
+
+        # normalize with DMS false because we don't have sequence info (it doesn't matter anyways)
+        EM.profile.backgroundSubtract(normalize=True, DMS=False) 
+
 
         if self.active_columns is None or self.inactive_columns is None:
             EM.initializeActiveCols(**kwargs)
         else:
             EM.setColumns(activecols=self.active_columns, inactivecols=self.inactive_columns)
 
-
         return EM
 
     
+
+
+    def getComponentEMobjects(self):
+        """Return EM objects for reads/mutations from initial assignments"""
+
+        em_list = []       
+        
+        for p in range(len(self.p)):
+            mask = (self.readassignments == p)
+            EM = self.constructEM(self.EM.reads[mask, :], self.EM.mutations[mask, :])
+            em_list.append(EM)
+
+        return em_list
+
+
+
     def writeParams(self, output):
         
         sortidx = range(len(self.p))
@@ -248,20 +287,32 @@ class SynBernoulliMixture():
             for i in range(self.mu.shape[1]):
                 OUT.write('{} '.format(i+1))
                 np.savetxt(OUT, self.mu[sortidx,i], fmt='%.4f', newline=' ')
-                OUT.write('; {0:.4f}\n'.format(self.bgrate[i]))
-
+                if self.bgrate is not None:
+                    OUT.write('; {0:.4f}'.format(self.bgrate[i]))
+                OUT.write('\n')
             
             
             for m in range(len(self.p)):
                 OUT.write('\n# Correlations {}\n'.format(m))
                 
                 corrs = self.correlations[m]
-                corrs.sort()
+                corrs.sort(key=lambda x:x[1])
+                corrs.sort(key=lambda x:x[0])
                 for c in corrs:
                     OUT.write('{0} {1} {2:.4f} {3:.4f} {4:.4f}\n'.format(c[0]+1, c[1]+1, c[2][3], self.mu[m,c[0]], self.mu[m,c[1]]))
 
     
+    def returnBM(self):
+        """return model as a BernoulliMixture object"""
+        
+        model = BernoulliMixture(pdim=self.p.shape[0], mudim=self.mu.shape[1])
+        
+        model.p = self.p
+        model.mu = self.mu
 
+        return model
+        
+        
 
 
 

@@ -1,6 +1,6 @@
-#cython: boundscheck=False, wraparound=False, nonecheck=False, cdivision=True
+#cython: boundscheck=False, wraparound=False, nonecheck=False, cdivision=True, language_level=2
 
-from libc.math cimport log, exp
+from libc.math cimport log, exp, lrint
 from libc.stdio cimport FILE, fopen, fclose, getline, printf, fflush, stdout
 
 import time
@@ -269,7 +269,7 @@ def maximizeMu(double[:,::1] mu, double[:,::1] readWeights,
     for d in xrange(modeldim):
         for j in xrange(actlen):
             col = activecols[j]
-            mu[d,col] = priorA[d,col]-1
+            mu[d,col] = priorA[d,col]
 
     # initialize denominator with priors
     cdef double[:,::1] positionweight = np.zeros((modeldim, actlen))
@@ -277,7 +277,7 @@ def maximizeMu(double[:,::1] mu, double[:,::1] readWeights,
     for d in xrange(modeldim):
         for j in xrange(actlen):
             col = activecols[j]
-            positionweight[d,j] = priorA[d,col]+priorB[d,col]-2
+            positionweight[d,j] = priorA[d,col]+priorB[d,col]
     
     # accumulate numerator and denominator
     for d in xrange(modeldim):
@@ -306,9 +306,18 @@ def maximizeMu(double[:,::1] mu, double[:,::1] readWeights,
 
 
 def fillRINGMatrix(char[:,::1] reads, char[:,::1] mutations, char[:] activestatus,
-                   double[:,::1] mu, double[:] p, int window, int subtractwindow): 
-    """active status is array continaing 0/1 whether or not column is active"""
+                   double[:,::1] mu, double[:] p, int window, double assignprob, int subtractwindow): 
+    """active status is array containing 0/1 whether or not column is to be included 
+    posterior prob calculations
     
+    assignprob<-1 --> use MAP
+    assignprob>0 --> use hard cutoff
+    """
+    
+    cdef int usemap = 0
+    if assignprob<0:
+        usemap=1
+
 
     # initialize RING matrices
     cdef int[:,:,::1] read_arr = np.zeros((p.shape[0], mu.shape[1], mu.shape[1]), dtype=np.int32)
@@ -321,28 +330,23 @@ def fillRINGMatrix(char[:,::1] reads, char[:,::1] mutations, char[:] activestatu
 
     cdef int pdim = p.shape[0]
 
-    # setup the random number generator
-    cdef dsfmt_t dsfmt
-    dsfmt_init_gen_rand(&dsfmt, np.uint32(time.time()))
-
     # compute logp
     cdef double[:] logp = np.log(p)
     
     # compute logmu and clogmu
     cdef double[:,::1] logmu = np.zeros((mu.shape[0], mu.shape[1]))
     cdef double[:,::1] clogmu = np.zeros((mu.shape[0], mu.shape[1]))
-    
     for i in xrange(pdim):
         for j in xrange(mu.shape[1]):
-            if mu[i,j] > 0: # since we are going over all cols (not just active) need to check
+            if mu[i,j] > 0:
                 logmu[i,j] = log( mu[i,j] )
                 clogmu[i,j] = log( 1-mu[i,j] )
     
 
     # declare other needed containers
     cdef double[:] loglike = np.empty(pdim) # container for read loglike of each model
-    cdef double[:] ll_i = np.empty(pdim) # continer for loglike subtracting i
-    cdef double[:] ll_ij = np.empty(pdim) # continer for loglike subtracting i & j
+    cdef double[:] ll_i = np.empty(pdim) # container for loglike subtracting i
+    cdef double[:] ll_ij = np.empty(pdim) # container for loglike subtracting i & j
     cdef double[:] weights = np.empty(pdim) # container for normalized probabilties
     
     # codes for contigency table
@@ -360,6 +364,12 @@ def fillRINGMatrix(char[:,::1] reads, char[:,::1] mutations, char[:] activestatu
         # compute overall loglike of the read
         readloglike(loglike, activestatus, reads[n,:], mutations[n,:], logp, logmu, clogmu)
         
+        # compute weight of read
+        _loglike2prob(loglike, weights)
+        
+        if usemap:
+            assignprob = _max(weights)
+
         
         # now iterate through all i/j pairs
         for i in xrange(read_arr.shape[1]-window+1):
@@ -368,56 +378,214 @@ def fillRINGMatrix(char[:,::1] reads, char[:,::1] mutations, char[:] activestatu
             icode = _computeMutCode(reads[n,:], mutations[n,:], i, window)
             if icode < 0: continue
             
-            # subtract i
-            for m in xrange(pdim):
-                ll_i[m] = loglike[m]
-
+            # compute weights on read-specific basis
             if subtractwindow:
+                # reset ll_i
+                for m in xrange(pdim):
+                    ll_i[m] = loglike[m]
+            
+                # subtract window i
                 _subtractloglike(ll_i, i, window, reads[n,:], mutations[n,:], activestatus, logmu, clogmu)
             
-            # compute weight of read ignoring i
-            _loglike2prob(ll_i, weights)
+                # compute weight of read ignoring i
+                _loglike2prob(ll_i, weights)
+
+                if usemap:
+                    assignprob = _max(weights)
+
+
 
             # increment the diagonal for keeping track of overall mutation rate
             for m in xrange(pdim):
-                if dsfmt_genrand_close_open(&dsfmt) <= weights[m]:
+                if weights[m] >= assignprob:
                     read_arr[m,i,i] += 1
                     if icode==1:
                         comut_arr[m,i,i] += 1
 
 
-            # iterate through all pairs
+
             for j in xrange(i+1, read_arr.shape[1]-window+1):
 
                 jcode = _computeMutCode(reads[n,:], mutations[n,:], j, window)
                 if jcode < 0: continue
                 
-                # reset ll_ij
-                for m in xrange(pdim):
-                    ll_ij[m] = ll_i[m]
-                
-                # subtract j
                 if subtractwindow:
+                    # reset ll_ij
+                    for m in xrange(pdim):
+                        ll_ij[m] = ll_i[m]
+                
+                    # subtract j
                     _subtractloglike(ll_ij, j, window, reads[n,:], mutations[n,:], activestatus, logmu, clogmu)
                 
-                # compute weight of read ignoring i & j
-                _loglike2prob(ll_ij, weights) 
+                    # compute weight of read ignoring i & j
+                    _loglike2prob(ll_ij, weights) 
                 
+                    if usemap:
+                        assignprob = _max(weights)
+
 
                 # now iterate through models and increment RING matrices
                 for m in xrange(pdim):
                     
                     # add the read
-                    if weights[m] > 0.9:
-                    #if dsfmt_genrand_close_open(&dsfmt) <= weights[m]:
+                    if weights[m] >= assignprob:
+                    
                         read_arr[m,i,j] += 1
+            
                         if icode == 1 and jcode == 1:
                             comut_arr[m,i,j] += 1
                         elif icode == 1 and jcode == 0:
                             inotj_arr[m,i,j] += 1
                         elif icode == 0 and jcode == 1:
                             inotj_arr[m,j,i] += 1
-                        
+    
+
+    # reset cursor to new line
+    printf("\n\n")
+    fflush(stdout)
+
+    return read_arr, comut_arr, inotj_arr                                    
+
+
+
+def fillRINGMatrix_montecarlo(char[:,::1] reads, char[:,::1] mutations, char[:] activestatus,
+                              double[:,::1] mu, double[:] p, int window, int samplenumber, int subtractwindow): 
+    """active status is array containing 0/1 whether or not column is to be included 
+    posterior prob calculations"""
+    
+
+    # initialize RING matrices
+    cdef int[:,:,::1] read_arr = np.zeros((p.shape[0], mu.shape[1], mu.shape[1]), dtype=np.int32)
+    cdef int[:,:,::1] comut_arr = np.zeros((p.shape[0], mu.shape[1], mu.shape[1]), dtype=np.int32)
+    cdef int[:,:,::1] inotj_arr = np.zeros((p.shape[0], mu.shape[1], mu.shape[1]), dtype=np.int32)
+
+
+    # declare counters
+    cdef int n,i,j,m
+
+    cdef int pdim = p.shape[0]
+    cdef int maxreadidx = reads.shape[0]-1
+
+    # setup the random number generator
+    cdef dsfmt_t dsfmt
+    dsfmt_init_gen_rand(&dsfmt, np.uint32(time.time()))
+
+    # compute logp
+    cdef double[:] logp = np.log(p)
+    
+    # compute logmu and clogmu
+    cdef double[:,::1] logmu = np.zeros((mu.shape[0], mu.shape[1]))
+    cdef double[:,::1] clogmu = np.zeros((mu.shape[0], mu.shape[1]))
+    for i in xrange(pdim):
+        for j in xrange(mu.shape[1]):
+            if mu[i,j] > 0:
+                logmu[i,j] = log( mu[i,j] )
+                clogmu[i,j] = log( 1-mu[i,j] )
+    
+
+    # declare other needed containers
+    cdef double[:] loglike = np.empty(pdim) # container for read loglike of each model
+    cdef double[:] ll_i = np.empty(pdim) # container for loglike subtracting i
+    cdef double[:] ll_ij = np.empty(pdim) # container for loglike subtracting i & j
+    cdef double[:] weights = np.empty(pdim) # container for normalized probabilties
+    cdef int[:] occupancy = np.empty(pdim, dtype=np.int32)
+    
+    # codes for contigency table
+    cdef int icode    
+    cdef int jcode 
+    
+    cdef int step = 0
+    
+    for step in xrange(samplenumber):
+        
+        if step%1000==0:
+            printf("\r%d", step)
+            fflush(stdout)
+
+        # select read (sample w/ replacement)
+        n = lrint(dsfmt_genrand_close_open(&dsfmt)*maxreadidx)
+
+        # compute overall loglike of the read
+        readloglike(loglike, activestatus, reads[n,:], mutations[n,:], logp, logmu, clogmu)
+        
+        _loglike2prob(loglike, weights)
+        
+        # compute occupancy based on whole read loglike
+        for m in xrange(pdim):
+            occupancy[m] = 0
+            if weights[m] >= dsfmt_genrand_close_open(&dsfmt):
+                occupancy[m] = 1
+
+
+        # now iterate through all i/j pairs
+        for i in xrange(read_arr.shape[1]-window+1):
+            
+            # compute mut code, and skip if not read at all
+            icode = _computeMutCode(reads[n,:], mutations[n,:], i, window)
+            if icode < 0: continue
+            
+            if subtractwindow:
+                # reset ll_i
+                for m in xrange(pdim):
+                    ll_i[m] = loglike[m]
+            
+                # subtract window i
+                _subtractloglike(ll_i, i, window, reads[n,:], mutations[n,:], activestatus, logmu, clogmu)
+            
+                # compute weight of read ignoring i
+                _loglike2prob(ll_i, weights)
+            
+
+            # increment the diagonal for keeping track of overall mutation rate
+            for m in xrange(pdim):
+                if occupancy[m]:
+                    read_arr[m,i,i] += 1
+                    if icode==1:
+                        comut_arr[m,i,i] += 1
+
+
+            for j in xrange(i+1, read_arr.shape[1]-window+1):
+
+                jcode = _computeMutCode(reads[n,:], mutations[n,:], j, window)
+                if jcode < 0: continue
+      
+
+                if subtractwindow:
+                    # reset ll_ij
+                    for m in xrange(pdim):
+                        ll_ij[m] = ll_i[m]
+                
+                    # subtract j
+                    _subtractloglike(ll_ij, j, window, reads[n,:], mutations[n,:], activestatus, logmu, clogmu)
+                
+                    # compute weight of read ignoring i & j
+                    _loglike2prob(ll_ij, weights) 
+                
+                    # compute occupancy
+                    for m in xrange(pdim):
+                        occupancy[m] = 0
+                        if weights[m] >= dsfmt_genrand_close_open(&dsfmt):
+                            occupancy[m] = 1
+         
+
+                # now iterate through models and increment RING matrices
+                for m in xrange(pdim):
+                    # add the read
+                    if occupancy[m]:
+                        read_arr[m,i,j] += 1
+            
+                        if icode == 1 and jcode == 1:
+                            comut_arr[m,i,j] += 1
+                        elif icode == 1 and jcode == 0:
+                            inotj_arr[m,i,j] += 1
+                        elif icode == 0 and jcode == 1:
+                            inotj_arr[m,j,i] += 1
+    
+
+
+    # reset cursor to new line
+    printf("\n\n")
+    fflush(stdout)
 
     return read_arr, comut_arr, inotj_arr                                    
 
@@ -480,6 +648,17 @@ cdef int _computeMutCode(char[:] read, char[:] mutation, int index, int window):
         return -1
 
 
+cdef double _max(double[:] values):
+
+    cdef int p
+    cdef double v = 0
+
+    for p in xrange(values.shape[0]):
+        if values[p] > v:
+            v=values[p]
+
+    return v
+
 
 
 cdef void readloglike(double[:] loglike, char[:] activestatus, char[:] read, char[:] mutation, 
@@ -492,7 +671,7 @@ cdef void readloglike(double[:] loglike, char[:] activestatus, char[:] read, cha
         
         loglike[p] = logp[p]
 
-        for i in xrange(activestatus.shape[0]):
+        for i in xrange(logmu.shape[1]):
 
             if activestatus[i]:
                 if mutation[i]:
@@ -592,7 +771,7 @@ def computeInformationMatrix(double[:] p, double[:,::1] mu, double[:,::1] readWe
     for d in xrange(ppar):
         for j in xrange(mupar):
             col = activecols[j]
-            Imat[idx,idx] += (priorA[d,col]-1)/mu[d,col]**2 + (priorB[d,col]-1)/(1-mu[d,col])**2
+            Imat[idx,idx] += (priorA[d,col])/mu[d,col]**2 + (priorB[d,col])/(1-mu[d,col])**2
             idx+=1
     
     return np.asarray(Imat)
