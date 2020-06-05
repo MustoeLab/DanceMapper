@@ -524,7 +524,7 @@ class BernoulliMixture(object):
         with np.errstate(divide='ignore',invalid='ignore'):
             maxmu = np.sum(mutations, axis=0, dtype=float) / np.sum(reads, axis=0)
         
-        maxmu = 1.2*np.max(maxmu[np.isfinite(maxmu)])
+        maxmu = 1.5*np.max(maxmu[np.isfinite(maxmu)])
 
         CM = ConvergenceMonitor(self.active_columns, maxsteps=maxiterations, convergeThresh=convergeThresh,
                                 maxmu = maxmu)

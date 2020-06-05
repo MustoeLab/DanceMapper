@@ -1231,7 +1231,7 @@ if __name__=='__main__':
         for i,model in enumerate(RE_list):
             
             if args.suppressverbal:
-                print('--------------Computing PAIRs : Model {}--------------'.format(p))
+                print('--------------Computing PAIRs : Model {}--------------'.format(i))
 
 
             model.writeCorrelations('{0}-{1}-allcorrs.txt'.format(args.outputprefix,i), 
