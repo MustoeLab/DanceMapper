@@ -116,7 +116,6 @@ class SynBernoulliMixture():
     
     def addCorrelation(self, i, j, modelnum, coupling):
     
-        
         i_marg = self.mu[modelnum, i]
         j_marg = self.mu[modelnum, j]
 
@@ -171,7 +170,7 @@ class SynBernoulliMixture():
         
 
             for corr in self.correlations[m]:
-                
+
                 selector = np.random.choice(4, num_reads, p=corr[2])
 
                 mask = (assignments == m) & (selector == 0)
@@ -202,7 +201,23 @@ class SynBernoulliMixture():
             self.readassignments = assignments
         
         return reads, muts
+    
 
+    def filterShortRange(self, reads, muts):
+
+        for i in range(reads.shape[0]):
+            
+            lastmut = reads.shape[1]+100
+            for j in range(reads.shape[1]-1, -1, -1):
+                if lastmut-j<5:
+                    if muts[i,j]:
+                        lastmut = j
+                    muts[i,j] = 0
+                    reads[i,j] = 0
+                
+                elif muts[i,j]:
+                    lastmut = j
+    
 
     
     def getEMobject(self, num_reads, nodata_rate=0.0, savedata=False, **kwargs):
@@ -309,6 +324,14 @@ class SynBernoulliMixture():
         
         model.p = self.p
         model.mu = self.mu
+
+        if self.active_columns is None:
+            model.active_columns = np.arange(self.mu.shape[1])
+            model.inactive_columns = np.array([])
+        else:
+            model.active_columns = self.active_columns
+            model.inactive_columns = self.inactive_columns
+
 
         return model
         

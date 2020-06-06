@@ -294,7 +294,8 @@ class EnsembleMap(object):
             allcols[inactivecols] = False
             invalid = np.where(allcols)[0]
             self.invalid_columns = np.array(invalid, dtype=int)
-            print("Cols {} initialized to inactive in setColumns".format(self.invalid_columns))
+            if len(self.invalid_columns) > 0:
+                print("Cols {} initialized to invalid in setColumns".format(self.invalid_columns))
 
 
         if inactivecols is not None and np.sum(np.isin(inactivecols, self.invalid_columns)) > 0:
@@ -978,7 +979,7 @@ class EnsembleMap(object):
 
 
     def computeRINGs(self, window=1, bgfile=None, assignprob=0.9,
-                     subtractwindow=True, montecarlo=False, verbal=True):
+                     subtractwindow=True, montecarlo=False, nulldifftest=True, verbal=True):
         """Compute RINGs based on posterior prob and mask out (i,j) pairs that are
         observed in null (uncorrelated) model. 
         Return list of RINGexperiment objects
@@ -987,6 +988,7 @@ class EnsembleMap(object):
         corrtype   = metric for computing correlations
         bgfile     = parsed mutation file for bg sample (to filter out bg mutations)
         assignprob = posterior prob. used for assigning reads to models
+        nulldifftest = perform difference G-test against null model as well
         verbal     = verbal"""
  
 
@@ -1012,7 +1014,7 @@ class EnsembleMap(object):
                                                           null_p.ex_inotjarr[j,i], null_p.ex_comutarr[i,j])
                 
                 # null correlated @ p<0.001 level or not significantly different @ p<1e-6
-                if nullcorr>10.83 or nulldiff<23.9:
+                if nullcorr>10.83 or (nulldifftest and nulldiff<23.9):
                 
                     if verbal and sample_p.ex_correlations[i,j]>23.9:
                         outstr='Model {}: Correlated pair ({},{}) w/ chi2={:.1f} ignored: NULL correlation chi2={:.1f} ; NULL difference chi2={:.1f}'.format(p,i+1,j+1, sample_p.ex_correlations[i,j], nullcorr, nulldiff)
