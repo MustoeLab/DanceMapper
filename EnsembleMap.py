@@ -163,7 +163,8 @@ class EnsembleMap(object):
 
 
     def initializeActiveCols(self, invalidcols=[], inactivecols=[], invalidrate=0.0001, 
-                             maxbg=0.02, minrxbg=0.002, verbal = True, **kwargs):
+                             maxbg=0.02, minrxbg=0.002, verbal = True, maskG=False,
+                             maskU=False, **kwargs):
         """Apply quality filters to eliminate noisy nts from EM fitting
         invalidcols = list of columns to set to invalid
         inactivecols = list of columns to set inactive
@@ -256,6 +257,29 @@ class EnsembleMap(object):
             print("Nts {} set to inactive due to low modification rate".format(self.ntindices[lowrx]))
 
         
+        # handle G and U nts
+        if maskG:
+            gcols = []
+            for i,s in enumerate(self.sequence):
+                if s == 'G' and i not in self.invalid_columns and i not in inactive:
+                    gcols.append(i)
+                    inactive.append(i)
+            
+            print('G columns set inactive:')
+            print gcols
+
+
+        if maskU:
+            ucols = []
+            for i,s in enumerate(self.sequence):
+                if s == 'U' and i not in self.invalid_columns and i not in inactive:
+                    ucols.append(i)
+                    inactive.append(i)
+
+            print('U columns set inactive:')
+            print ucols
+
+       
         inactive.sort()
         self.inactive_columns = np.array(inactive, dtype=int)
 
@@ -1085,6 +1109,9 @@ def parseArguments():
     fitopt.add_argument('--writeintermediates', action='store_true', help='Write each BM solution to file with specified prefix. Will be saved as prefix-intermediate-[component]-[trial].bm')
 
     fitopt.add_argument('--priorWeight', type=float, default=0.001, help='Weight of prior on Mu (default=0.001). Prior = priorWeight*readDepth*bgRate at each nt. Prior is disabled by passing -1, upon which a naive prior is used.')
+    fitopt.add_argument('--maskG', action='store_true', help='set all Us to inactive')
+    fitopt.add_argument('--maskU', action='store_true', help='set all Gs to inactive')
+
 
 
     ############################################################
@@ -1107,6 +1134,7 @@ def parseArguments():
     optional.add_argument('--suppressverbal', action='store_false', help='Suppress verbal output')
     optional.add_argument('--outputprefix', type=str, default='emfit', help='Write output files with this prefix (default=emfit)')
     
+
 
     parser._action_groups.append(optional)
 
@@ -1161,6 +1189,8 @@ if __name__=='__main__':
     EM = EnsembleMap(modfile=args.modified_parsed, untfile=args.untreated_parsed,
                      profilefile=args.profile, 
                      minrxbg = args.minrxbg,
+                     maskG = args.maskG,
+                     maskU = args.maskU,
                      minreadcoverage=args.mincoverage, 
                      undersample=args.undersample,
                      verbal=args.suppressverbal)
@@ -1203,7 +1233,7 @@ if __name__=='__main__':
         for i,model in enumerate(RE_list):
             
             if args.suppressverbal:
-                print('--------------Computing PAIRs : Model {}--------------'.format(p))
+                print('--------------Computing PAIRs : Model {}--------------'.format(i))
 
 
             model.writeCorrelations('{0}-{1}-allcorrs.txt'.format(args.outputprefix,i), 
