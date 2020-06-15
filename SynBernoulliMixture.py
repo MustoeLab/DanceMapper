@@ -51,11 +51,25 @@ class SynBernoulliMixture():
 
         self.p = BM.p
         self.mu = BM.mu
-
-        self.correlations = [ [] for x in self.p ] 
-
+        
         self.active_columns = BM.active_columns
         self.inactive_columns = BM.inactive_columns
+
+        self.correlations = [ [] for x in self.p ] 
+        
+        # read in the correlations
+        corridx = -1
+        with open(fname) as inp:
+            for line in inp:
+                spl = line.split()
+                if line[:6] == '# Corr':
+                    corridx = int(spl[-1])
+                elif corridx >= 0 and len(spl) != 5:
+                    corridx = -1
+                elif corridx >= 0:
+                    self.correlations[corridx].append((int(spl[0]), int(spl[1]), 
+                                                       float(spl[2]), float(spl[3]), float(spl[4])))
+
 
 
             

@@ -280,7 +280,7 @@ class BernoulliMixture(object):
 
     def __init__(self, pdim = None, mudim = None, p_initial=None, mu_initial=None,
                  active_columns = None, inactive_columns = None, idxmap = None,
-                 priorA=1, priorB=1):
+                 priorA=1, priorB=1, fname=None):
         """Flexibly initialize BM object
         pdim             = dimension of the p vector -- i.e. number of model components
         mudim            = dimension of the mu vector -- i.e. number of data columns
@@ -340,7 +340,9 @@ class BernoulliMixture(object):
         if active_columns is not None or self.mudim is not None:
             self.set_active_columns(active_columns)
 
-    
+        if fname is not None:
+            self.readModelFromFile(fname)
+
 
     def copy(self):
         """return deep copy of BM"""

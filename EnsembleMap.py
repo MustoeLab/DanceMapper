@@ -881,17 +881,20 @@ class EnsembleMap(object):
         activestatus[self.active_columns] = 1
         activestatus[self.inactive_columns] = 1
      
-        if verbal:
-            print('Using {:.3f} as posterior prob for sample RING read assignment'.format(assignprob))
-
-
+        
         # fill in the matrices
         if montecarlo:
+            if verbal:
+                print('Using MC for sample RING read assignment')
+            
             read, comut, inotj = aFunc.fillRINGMatrix_montecarlo(self.reads, self.mutations, activestatus,
                                                                  self.BMsolution.mu, self.BMsolution.p, 
                                                                  window, self.reads.shape[0], subtractwindow)
         
         else:
+            if verbal:
+                print('Using {:.3f} as posterior prob for sample RING read assignment'.format(assignprob))
+
             read, comut, inotj = aFunc.fillRINGMatrix(self.reads, self.mutations, activestatus,
                                                       self.BMsolution.mu, self.BMsolution.p, window, assignprob, 
                                                       subtractwindow)
@@ -965,16 +968,19 @@ class EnsembleMap(object):
         activestatus[self.active_columns] = 1
         activestatus[self.inactive_columns] = 1
         
-        if verbal:
-            print('Using {:.3f} as posterior prob for null RING read assignment'.format(assignprob))
-
-
+        
         # fill in the matrices
         if montecarlo:
+            if verbal:
+                print('Using MC for null RING read assignment')
+
             read, comut, inotj = aFunc.fillRINGMatrix_montecarlo(nullEM.reads, nullEM.mutations, activestatus,
                                                                  mu, self.BMsolution.p, 
                                                                  window, self.reads.shape[0], subtractwindow)
         else:
+            if verbal:
+                print('Using {:.3f} as posterior prob for null RING read assignment'.format(assignprob))
+
             read, comut, inotj = aFunc.fillRINGMatrix(nullEM.reads, nullEM.mutations, activestatus,
                                                       mu, self.BMsolution.p, window, assignprob, 
                                                       subtractwindow)
