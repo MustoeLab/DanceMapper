@@ -81,6 +81,13 @@ class SynBernoulliMixture():
             self.mu = np.vstack(self.mu)
             self.p = np.array(self.p)
         
+        # sort the values
+        sortidx = range(len(self.p))
+        sortidx.sort(key=lambda x: self.p[x], reverse=True)
+        self.p = self.p[sortidx]
+        self.mu = self.mu[sortidx]
+        self.correlations = [self.correlations[x] for x in sortidx]
+
 
         # make sure all values are defined
         self.mu[np.isnan(self.mu)] = -1
@@ -324,7 +331,7 @@ class SynBernoulliMixture():
             for m in range(len(self.p)):
                 OUT.write('\n# Correlations {}\n'.format(m))
                 
-                corrs = self.correlations[m]
+                corrs = self.correlations[sortidx[m]]
                 corrs.sort(key=lambda x:x[1])
                 corrs.sort(key=lambda x:x[0])
                 for c in corrs:
