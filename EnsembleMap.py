@@ -1054,8 +1054,7 @@ class EnsembleMap(object):
                     sample_p.ex_correlations[j,i] = np.ma.masked
                     sample_p.ex_zscores[i,j] = np.ma.masked
                     sample_p.ex_zscores[j,i] = np.ma.masked
-
-
+            
         return sample
                                      
 
@@ -1130,6 +1129,7 @@ def parseArguments():
     ringopt.add_argument('--pairmap', action='store_true', help='Run PAIR-MaP analysis on clustered reads') 
     ringopt.add_argument('--readprob_cut', type=float, default=0.9, help='Posterior probability cutoff for assigning reads for inclusion in ring/pairmap analysis. Reads must have posterior prob greater than the cutoff (default=0.9)')
     ringopt.add_argument('--chisq_cut', type=float, default=23.9, help="Set chisq cutoff for RING/PAIR-MaP analysis (default = 23.9)")
+    ringopt.add_argument('--nowindowsubtract', action='store_false')
 
     ############################################################
     # Other options
@@ -1220,7 +1220,7 @@ if __name__=='__main__':
 
     if args.ring:
 
-        RE_list = EM.computeRINGs(window=args.window, bgfile=args.untreated_parsed, 
+        RE_list = EM.computeRINGs(window=args.window, bgfile=args.untreated_parsed, subtractwindow=args.nowindowsubtract,
                                   assignprob=args.readprob_cut, verbal=args.suppressverbal)
 
         for i,model in enumerate(RE_list):
@@ -1233,7 +1233,7 @@ if __name__=='__main__':
         
         profiles = EM.computeNormalizedReactivities()
 
-        RE_list = EM.computeRINGs(window=3, bgfile=args.untreated_parsed, 
+        RE_list = EM.computeRINGs(window=3, bgfile=args.untreated_parsed, subtractwindow=args.nowindowsubtract,
                                   assignprob=args.readprob_cut, verbal=args.suppressverbal)
 
         for i,model in enumerate(RE_list):

@@ -357,7 +357,7 @@ def fillRINGMatrix(char[:,::1] reads, char[:,::1] mutations, char[:] activestatu
     # traverse over reads
     for n in xrange(reads.shape[0]):
         
-        if n%1000==0:
+        if n%10000==0:
             printf("\r%d",n)
             fflush(stdout)
 
@@ -498,7 +498,7 @@ def fillRINGMatrix_montecarlo(char[:,::1] reads, char[:,::1] mutations, char[:] 
     
     for step in xrange(samplenumber):
         
-        if step%1000==0:
+        if step%10000==0:
             printf("\r%d", step)
             fflush(stdout)
 

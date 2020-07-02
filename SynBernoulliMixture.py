@@ -47,7 +47,7 @@ class SynBernoulliMixture():
     def readModelfromFile(self, fname):
 
         BM = BernoulliMixture()
-        BM.readModelFromFile(fname)
+        BM.readModelFromFile(fname, syntype=True)
 
         self.p = BM.p
         self.mu = BM.mu

@@ -841,7 +841,7 @@ class BernoulliMixture(object):
 
 
 
-    def readModelFromFile(self, fname):
+    def readModelFromFile(self, fname, syntype=False):
         """Read in BM model from file"""
         
 
@@ -870,8 +870,7 @@ class BernoulliMixture(object):
             idxmap = []
             
             i = -1
-            read = True
-            while read:
+            while True:
                 
                 i += 1
                 spl = inp.readline().split()
@@ -920,6 +919,9 @@ class BernoulliMixture(object):
             self.mudim = self.mu.shape[1]
             
             self.mu_err = np.array(mu_err).transpose()
+            
+            if syntype:
+                return
 
             # read in initial p
             inp.readline()
