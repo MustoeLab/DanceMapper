@@ -1,6 +1,7 @@
 
 import numpy as np
 import sys, argparse, itertools
+import datetime
 
 # get path to functions needed for mutstring I/O
 import ringmapperpath
@@ -1190,8 +1191,14 @@ def parseArguments():
 
 if __name__=='__main__':
     
+    print(' '.join(sys.argv[:]))
+    print('\nStarting up Ensemble-MaP')
+    print('{:%Y-%m-%d %H:%M:%S}'.format(datetime.datetime.now()))
+
     args = parseArguments()
-    
+    print('Arguments = {}\n\n'.format(args))
+
+
     EM = EnsembleMap(modfile=args.modified_parsed, untfile=args.untreated_parsed,
                      profilefile=args.profile, 
                      minrxbg = args.minrxbg,
