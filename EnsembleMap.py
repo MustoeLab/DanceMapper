@@ -1100,7 +1100,7 @@ def parseArguments():
     
     quality = parser.add_argument_group('quality filtering options')
     quality.add_argument('--mincoverage', type=int, help='Minimum coverage (integer number of nts) required for read to be included in cacluations')
-    quality.add_argument('--minrxbg', type=float, default=0.002, help='Set nts with rx-bg less than this to inactive (default=0.002)')
+    quality.add_argument('--minrxbg', type=float, default=0.005, help='Set nts with rx-bg less than this to inactive (default=0.002)')
     quality.add_argument('--undersample', type=int, default=-1, help='Only cluster with this number of reads. By default this option is disabled and all reads are used (default=-1).')
     
 
