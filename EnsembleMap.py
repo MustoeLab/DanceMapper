@@ -959,7 +959,7 @@ class EnsembleMap(object):
         null_model = SynBernoulliMixture(p=self.BMsolution.p, mu=mu)
         
         # generate synthetic reads 
-        nullEM = null_model.getEMobject(self.reads.shape[0], nodata=0.1, 
+        nullEM = null_model.getEMobject(2*self.reads.shape[0], nodata_rate=0.1, 
                                         invalidcols=self.invalid_columns,
                                         verbal=False)
  
@@ -1045,7 +1045,7 @@ class EnsembleMap(object):
                                                           null_p.ex_inotjarr[j,i], null_p.ex_comutarr[i,j])
                 
                 # null correlated @ p<0.001 level or not significantly different @ p<1e-6
-                if nullcorr>10.83 or (nulldifftest and nulldiff<23.9):
+                if nullcorr>6.63 or (nulldifftest and nulldiff<23.9):
                 
                     if verbal and sample_p.ex_correlations[i,j]>23.9:
                         outstr='Model {}: Correlated pair ({},{}) w/ chi2={:.1f} ignored: NULL correlation chi2={:.1f} ; NULL difference chi2={:.1f}'.format(p,i+1,j+1, sample_p.ex_correlations[i,j], nullcorr, nulldiff)
