@@ -1035,6 +1035,10 @@ class EnsembleMap(object):
         # compute rings from experimental data
         sample = self._sample_RINGs(window=window, bgfile=bgfile, assignprob=assignprob, 
                                     subtractwindow=subtractwindow, montecarlo=montecarlo, verbal=verbal) 
+        
+        if not nulldifftest:
+            return sample
+
 
         # compute correlations from null model (clustering only w/o correlations)
         null = self._null_RINGs(window=window, assignprob=assignprob, 
@@ -1053,13 +1057,14 @@ class EnsembleMap(object):
                 nulldiff = sample_p.significantDifference(i,j, null_p.ex_readarr[i,j], null_p.ex_inotjarr[i,j],
                                                           null_p.ex_inotjarr[j,i], null_p.ex_comutarr[i,j])
                 
-                # null correlated @ p<0.001 level or not significantly different @ p<1e-6
-                if nullcorr>6.63 or (nulldifftest and nulldiff<23.9):
                 
-                    if verbal and sample_p.ex_correlations[i,j]>23.9:
+                # p=0.001 for df=1 and df=3, respectively
+                if nullcorr>10.83 or nulldiff < 16.27:
+
+                    if verbal and sample_p.ex_correlations[i,j]>23.93:
                         outstr='Model {}: Correlated pair ({},{}) w/ chi2={:.1f} ignored: NULL correlation chi2={:.1f} ; NULL difference chi2={:.1f}'.format(p,i+1,j+1, sample_p.ex_correlations[i,j], nullcorr, nulldiff)
                         print(outstr)
-
+                
                     sample_p.ex_correlations[i,j] = np.ma.masked
                     sample_p.ex_correlations[j,i] = np.ma.masked
                     sample_p.ex_zscores[i,j] = np.ma.masked
@@ -1109,7 +1114,7 @@ def parseArguments():
     
     quality = parser.add_argument_group('quality filtering options')
     quality.add_argument('--mincoverage', type=int, help='Minimum coverage (integer number of nts) required for read to be included in cacluations')
-    quality.add_argument('--minrxbg', type=float, default=0.005, help='Set nts with rx-bg less than this to inactive (default=0.002)')
+    quality.add_argument('--minrxbg', type=float, default=0.002, help='Set nts with rx-bg less than this to inactive (default=0.002)')
     quality.add_argument('--undersample', type=int, default=-1, help='Only cluster with this number of reads. By default this option is disabled and all reads are used (default=-1).')
     
 
