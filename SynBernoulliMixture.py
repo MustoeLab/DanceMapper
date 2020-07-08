@@ -82,11 +82,11 @@ class SynBernoulliMixture():
             self.p = np.array(self.p)
         
         # sort the values
-        sortidx = range(len(self.p))
-        sortidx.sort(key=lambda x: self.p[x], reverse=True)
-        self.p = self.p[sortidx]
-        self.mu = self.mu[sortidx]
-        self.correlations = [self.correlations[x] for x in sortidx]
+        #sortidx = range(len(self.p))
+        #sortidx.sort(key=lambda x: self.p[x], reverse=True)
+        #self.p = self.p[sortidx]
+        #self.mu = self.mu[sortidx]
+        #self.correlations = [self.correlations[x] for x in sortidx]
 
 
         # make sure all values are defined

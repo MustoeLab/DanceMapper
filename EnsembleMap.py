@@ -428,7 +428,7 @@ class EnsembleMap(object):
 
 
     def fitEM(self, components, trials=5, soln_termcount=3, badcolcount0=2, badcolcount=5, 
-              priorWeight=0.001, verbal=False, writeintermediate=None, **kwargs):
+              priorWeight=0.001, verbal=False, writeintermediate=None, savesolution=False, **kwargs):
         """Fit Bernoulli Mixture model of a specified number of components.
         Trys a number of random starting conditions. Terminates after finding a 
         repeated valid solution, a repeated set of 'invalid' column solutions, 
@@ -572,6 +572,15 @@ class EnsembleMap(object):
             self.setColumns(activecols=bestfit.active_columns, 
                             inactivecols=bestfit.inactive_columns)    
         
+
+        if savesolution:
+            bestfit.imputeInactiveParams(self.reads, self.mutations)
+            self.BMsolution = bestfit
+            self.BMsolution.sort_model()
+            self.qualityCheck()
+            
+            bestfit = self.BMsolution
+            
 
         return bestfit
         
@@ -1099,7 +1108,7 @@ def parseArguments():
     
     quality = parser.add_argument_group('quality filtering options')
     quality.add_argument('--mincoverage', type=int, help='Minimum coverage (integer number of nts) required for read to be included in cacluations')
-    quality.add_argument('--minrxbg', type=float, default=0.002, help='Set nts with rx-bg less than this to inactive (default=0.002)')
+    quality.add_argument('--minrxbg', type=float, default=0.005, help='Set nts with rx-bg less than this to inactive (default=0.002)')
     quality.add_argument('--undersample', type=int, default=-1, help='Only cluster with this number of reads. By default this option is disabled and all reads are used (default=-1).')
     
 
@@ -1108,6 +1117,7 @@ def parseArguments():
 
     fitopt = parser.add_argument_group('options for fitting data')
     fitopt.add_argument('--fit', action='store_true', help='Flag specifying to fit data')
+    fitopt.add_argument('--forcefit', type=int, help='Force fit to specified number of components')
     fitopt.add_argument('--maxcomponents', type=int, default=5, help='Maximum number of components to fit (default=5)')
     fitopt.add_argument('--trials', type=int, default=50, help='Maximum number of fitting trials at each component number (default=50)')
     fitopt.add_argument('--badcol_cutoff', type=int, default=5, help='Inactivate column after it causes a failure X number of times *after* a valid soln has already been found (default=5)')
@@ -1212,7 +1222,24 @@ if __name__=='__main__':
         EM.writeReactivities(args.outputprefix+'-reactivities.txt')
         EM.BMsolution.writeModel(args.outputprefix+'.bm')
 
+
+
+    elif args.forcefit:
+
+        bestBM = EM.fitEM(args.forcefit, trials=200, 
+                          badcolcount = args.badcol_cutoff,
+                          priorWeight = args.priorWeight,
+                          verbal = args.suppressverbal, 
+                          writeintermediate = args.writeintermediate,
+                          savesolution = True)
+
+        EM.writeReactivities(args.outputprefix+'-reactivities.txt')
+        EM.BMsolution.writeModel(args.outputprefix+'.bm')
+
     
+
+
+
     elif args.readfromfile is not None:
 
         EM.readModelFromFile(args.readfromfile)
