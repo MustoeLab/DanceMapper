@@ -42,6 +42,8 @@ class EnsembleMap(object):
 
         # np.array of sequence positions that are 'invalid' -- don't cluster at all
         self.invalid_columns=None
+        
+        self.maxinactive = 0.8 # max fraction of initialActiveCols allowed to be inactivated
 
         # info about the reads
         self.seqlen = None
@@ -396,7 +398,7 @@ class EnsembleMap(object):
         if len(columns) == 0:
             return
         
-        if len(self.active_columns)-len(columns) < 0.8*self.initialActiveCount:
+        if len(self.active_columns)-len(columns) < self.maxinactive*self.initialActiveCount:
             print("Call to setActiveColumnsInactive ignored -- maximum inactive exceeded")
             return
 
@@ -429,7 +431,7 @@ class EnsembleMap(object):
 
 
     def fitEM(self, components, trials=5, soln_termcount=3, badcolcount0=2, badcolcount=5, 
-              priorWeight=0.001, verbal=False, writeintermediate=None, savesolution=False, **kwargs):
+              priorWeight=0.001, verbal=False, writeintermediate=None, forcefit=False, **kwargs):
         """Fit Bernoulli Mixture model of a specified number of components.
         Trys a number of random starting conditions. Terminates after finding a 
         repeated valid solution, a repeated set of 'invalid' column solutions, 
@@ -464,6 +466,10 @@ class EnsembleMap(object):
         if verbal and priorWeight>0:
             print('Using priorWeight={0}'.format(priorWeight))
         
+        if forcefit:
+            self.maxinactive=0.5
+
+
         # array for each col; incremented when a col causes failure of BM soln
         badcolumns = np.zeros(self.seqlen, dtype=np.int32)
          
@@ -574,7 +580,7 @@ class EnsembleMap(object):
                             inactivecols=bestfit.inactive_columns)    
         
 
-        if savesolution:
+        if forcefit:
             bestfit.imputeInactiveParams(self.reads, self.mutations)
             self.BMsolution = bestfit
             self.BMsolution.sort_model()
@@ -1170,8 +1176,8 @@ def parseArguments():
         sys.exit(1)
      
     
-    if not args.fit and not args.ring and not args.pairmap:
-        sys.stderr.write("\n Action argument [fit, ring, pairmap] not provided\n\n")
+    if not args.fit and not args.ring and not args.pairmap and not args.forcefit:
+        sys.stderr.write("\n Action argument [fit, ring, pairmap, forcefit] not provided\n\n")
         sys.exit(1)
     
 
@@ -1237,8 +1243,8 @@ if __name__=='__main__':
                           badcolcount = args.badcol_cutoff,
                           priorWeight = args.priorWeight,
                           verbal = args.suppressverbal, 
-                          writeintermediate = args.writeintermediate,
-                          savesolution = True)
+                          writeintermediate = args.writeintermediates,
+                          forcefit = True)
 
         EM.writeReactivities(args.outputprefix+'-reactivities.txt')
         EM.BMsolution.writeModel(args.outputprefix+'.bm')
