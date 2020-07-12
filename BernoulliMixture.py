@@ -9,7 +9,7 @@ try:
     sys.path.append(ringmapperpath.path())
     import accessoryFunctions
 except:
-    print('WARNING: Could not import accessoryFunctions!')
+    raise ImportError('Could not import accessoryFunctions! ringmapperpath is not set appropriately')
 
 
 
@@ -46,6 +46,7 @@ class ConvergenceMonitor(object):
     """Object to monitor convergence of EM algorithm"""
 
     def __init__(self, activecols, convergeThresh=1e-4, maxmu=0.5, maxsteps=1000, initsteps=51):
+        """Init the monitor. Activecols is the list of columns to monitor convergence on"""
 
         self.step = 0
         self.lastp = None
@@ -65,6 +66,7 @@ class ConvergenceMonitor(object):
 
 
     def update(self, p, mu):
+        """Main function called after each EM step to check covergence and validity"""
         
         self.step += 1
         
@@ -76,7 +78,7 @@ class ConvergenceMonitor(object):
         # check convergence
         self.checkConvergence(p,mu)
         
-
+        # check validity after initial burn-in steps are passed
         if self.step >= self.initsteps or self.converged:
             try:
                 self.checkParamBounds(p, mu)
@@ -101,7 +103,8 @@ class ConvergenceMonitor(object):
         """
         
         activemu = mu[:,self.active_columns]
-
+        
+        # initialize if the first call to the monitor
         if self.lastp is None:
             self.lastp = np.copy(p)
             self.lastmu = np.copy(activemu)
@@ -148,14 +151,14 @@ class ConvergenceMonitor(object):
     
 
     def checkMuRatio(self, mu, ratioCutoff=5.3):
-        """Check to make sure that mu ratio does not exceed ratioCutoff
+        """Check to make sure that ratio of mu values within a given column does not exceed ratioCutoff
         ratioCutoff is ln-space; ln(200)=5.3; ln(100)=4.6"""
         
         activemu = mu[:, self.active_columns]
         
         hivalues = set()
 
-        # iterate through all params
+        # iterate through all model components
         for i,j in itertools.combinations(range(mu.shape[0]), 2):
             
             # compute ratio of reactivities
@@ -172,6 +175,7 @@ class ConvergenceMonitor(object):
     def checkDegenerate(self, mu, excludepercent=99):
         """Check to see if converging to degenerate parameters
         Uses trend of rmsdiff to prematurely terminate 
+        Exclude the most extreme values (excludepercent) from RMS calculation
         """
         
         activemu = mu[:, self.active_columns]
@@ -292,9 +296,11 @@ class BernoulliMixture(object):
 
         priorA     = int or arraylike of A parameters for the beta prior
         priorB     = int or arraylike of B parameters for the beta prior
+        
+        fname      = path to saved bm file (load it)
 
         Note that if p_initial and/or mu_initial are provided, their dimension
-                will override components, ncols parameters
+                will override pdim/mudim
         """
         
         
@@ -400,7 +406,8 @@ class BernoulliMixture(object):
             raise AttributeError("pdim is not defined")
         if self.mudim is None:
             raise AttributeError("mudim is not defined")
-
+        
+        # initialize values randomly, but distributed around typical solution 
         self.mu_initial = np.random.beta(1,40, (self.pdim, self.mudim))+0.001
         self.converged = False
 
@@ -432,7 +439,8 @@ class BernoulliMixture(object):
     
 
     def compute1ComponentModel(self, reads, mutations):
-        
+        """Quick method for computing 1 component model (no EM needed)"""
+
         if self.active_columns is None:
             self.set_active_columns()
 
@@ -460,7 +468,8 @@ class BernoulliMixture(object):
 
 
     def computePosteriorProb(self, reads, mutations):
-        
+        """Compute posterior probability of each read given p and mu (the E step)"""
+
         # init the weight matrix
         W = np.zeros((self.pdim, reads.shape[0]), dtype=np.float64)
 
@@ -478,6 +487,7 @@ class BernoulliMixture(object):
 
 
     def maximization(self, reads, mutations, W):
+        """Perform the M step: maximize p and mu given posterior probs"""
         
         accessoryFunctions.maximizeP(self.p, W)
             
@@ -523,11 +533,14 @@ class BernoulliMixture(object):
         self.mu = np.copy( self.mu_initial )
         
         
+        # set threshold for max valid mu (reactivity)
         with np.errstate(divide='ignore',invalid='ignore'):
             maxmu = np.sum(mutations, axis=0, dtype=float) / np.sum(reads, axis=0)
         
         maxmu = min(0.5, 3*np.max(maxmu[np.isfinite(maxmu)]))
+        
 
+        # init the ConvergenceMonitor
         CM = ConvergenceMonitor(self.active_columns, maxsteps=maxiterations, convergeThresh=convergeThresh,
                                 maxmu = maxmu)
         
@@ -538,6 +551,7 @@ class BernoulliMixture(object):
             # expectation step
             W = self.computePosteriorProb(reads, mutations)
             
+            # maximization step
             self.maximization(reads, mutations, W)
             
             # this will throw ConvergenceErrors if bad soln
@@ -664,7 +678,7 @@ class BernoulliMixture(object):
 
 
         # compute mu errors
-        mu_err = -1*np.ones(self.mu.shape) # initialize to -1, which will be value inactive/invalid
+        mu_err = -1*np.ones(self.mu.shape) # initialize to -1, which will be value for inactive/invalid cols
         
         for d in range(self.pdim):
             for i, col in enumerate(self.active_columns):
@@ -681,7 +695,7 @@ class BernoulliMixture(object):
         """Align BM2 to current BM
         Alignment is done to minimize RMS difference between Mus
         
-        returns idx, rmsdiff
+        returns alignment index
         """
         
         if not np.array_equal(self.active_columns, BM2.active_columns) and \
@@ -692,7 +706,7 @@ class BernoulliMixture(object):
             #raise ValueError("active_columns of two BernoulliMixture objects are not the same")
 
 
-        mindiff = 1000
+        mindiff = 1e5
         for idx in itertools.permutations(range(self.pdim)):
             
             d = self.mu - BM2.mu[idx,]
@@ -814,7 +828,7 @@ class BernoulliMixture(object):
         OUT.write('\n# PriorA\n')
         np.savetxt(OUT, self.priorA, fmt='%.16f')
 
-        OUT.write('\n\n# PriorB\n')
+        OUT.write('\n# PriorB\n')
         np.savetxt(OUT, self.priorB, fmt='%.16f')
 
 
@@ -842,7 +856,10 @@ class BernoulliMixture(object):
 
 
     def readModelFromFile(self, fname, syntype=False):
-        """Read in BM model from file"""
+        """Read in BM model from file
+        syntype is flag indicating that file is a SynBernoulliMixture file and thus 
+            doesn't have initialization data
+        """
         
 
         with open(fname) as inp:
@@ -886,7 +903,7 @@ class BernoulliMixture(object):
 
                     # invalid nt
                     if vals[0] != vals[0]:
-                        mu.append([np.nan]*self.pdim)
+                        mu.append([-1]*self.pdim)
                         mu_err.append([-1]*self.pdim)
                         continue # skip to next position so not added to inactive/active list
                     else:
@@ -920,6 +937,7 @@ class BernoulliMixture(object):
             
             self.mu_err = np.array(mu_err).transpose()
             
+            # if created by SynBernoulli, then there is no initialization values so return now
             if syntype:
                 return
 
@@ -933,10 +951,9 @@ class BernoulliMixture(object):
             self.mu_initial = -1*np.ones(self.mu.shape)
             
             i = -1
-            read = True
             
             # read in initial mu
-            while read:
+            while True:
                 i += 1
                 spl = inp.readline().split()
                 if len(spl)==0 or spl[0][0]=='#':
@@ -944,22 +961,28 @@ class BernoulliMixture(object):
 
                 self.mu_initial[:, i] = map(float, spl[1:])
             
-            return
 
-            # read in priorA
-            inp.readline()
+            # clear empty space / header before priorA
+            while True:
+                if inp.readline()[0]=='#':
+                    break
+            
             priorA = []
             for i in range(self.pdim):
                 priorA.append(map(float, inp.readline().split()))
-            self.priorA = priorA
+            self.priorA = np.array(priorA)
+            
 
-            inp.readline()
-            inp.readline()
+            # clear empty space / header before priorB
+            while True:
+                if inp.readline()[0]=='#':
+                    break
+            
             priorB = []
             for i in range(self.pdim):
                 priorB.append(map(float, inp.readline().split()))
-            self.priorB = priorB
-        
+            self.priorB = np.array(priorB)
+            
 
 
     def imputeInactiveParams(self, reads, mutations):
@@ -983,13 +1006,13 @@ class BernoulliMixture(object):
         nsteps = 0
         while not converged and nsteps<1000:
             
-            # update posterior probs based on inactive_column info
+            # update posterior probs based on combined column info
             if nsteps > 0:
                 accessoryFunctions.loglikelihoodmatrix(W, reads, mutations, combined_columns, self.mu, self.p)
                 W = np.exp(W)
                 W /= W.sum(axis=0)
             
-            # update inactive mu
+            # update inactive mu parameters
             accessoryFunctions.maximizeMu(self.mu, W, reads, mutations, self.inactive_columns, self.priorA, self.priorB)
             
 

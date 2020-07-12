@@ -142,8 +142,7 @@ class SynBernoulliMixture():
         
 
         if min(probarray) < 0 or not np.isclose(probarray.sum(), 1):
-            print probarray
-            raise ValueError('Invalid correlation parameters')
+            raise ValueError('Invalid correlation parameters: prob = {}'.format(probarray))
 
 
         self.correlations[modelnum].append( (i,j,probarray) ) 
