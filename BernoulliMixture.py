@@ -214,60 +214,59 @@ class ConvergenceMonitor(object):
 
 
     def artifactCheck(self, mu):
-        """Check for artifacts where one highly reactive nt absorbs all mutation 
-        signal, causing preceding 5 nts to have very low reactivity due to 
-        alignment constraint. This gives characteristic anticorrelated local 
-        reactivity profile. Will throw ConvergenceError if found
+        """Check for anticorrelated artifacts
         """
 
         activemu = mu[:, self.active_columns]
         activecols = self.active_columns
 
-        badidxs = set()
+        badidxs = []
 
         # iterate through all params
-        for i,j in itertools.permutations(range(mu.shape[0]), 2):
+        for i,j in itertools.combinations(range(mu.shape[0]), 2):
  
-            # identify positions with high difference in reactivity
-            ratio = activemu[i]/activemu[j] 
-            hivalues = np.where(ratio > 10)[0]
-            
-            for idx in hivalues:
+            for idx, col in enumerate(activecols):
                 
-                colidx = activecols[idx]
-
-                # scan 5' of each hi ratio value to see if artifact
-                suppressed = True
-                counted = False
-                for m in range(1,6):
-                    # if at least one nt is decently reactive, not an artifact
-                    if (idx-m)>=0 and (activecols[idx]-activecols[idx-m])<6:
-                        counted = True
-                        if ratio[idx-m] > 0.1:
-                            suppressed = False
-
-                if counted and suppressed:
-                    badidxs.add(idx)
-                    continue
-
-
-                # scan 3' of each hi ratio value to see if artifact
-                suppressed = True
-                counted = False
-                for m in range(1,6):
-                    # if at least one nt is decently reactive, not an artifact
-                    if (idx+m)<len(activecols) and (activecols[idx+m]-activecols[idx])<6:
-                        counted = True
-                        if ratio[idx+m] > 0.1:
-                            suppressed = False
+                prob1 = 0
+                prob2 = 0 
+                
+                for m in range(11):
+                    if (idx+m)>len(activecols)-1:
+                        continue
                     
-                if counted and suppressed:
-                    badidxs.add(idx) 
+                    idxdiff = activecols[idx+m]-activecols[idx]
+                    mcol = activecols[idx+m]
 
-        badidxs = self.active_columns[sorted(badidxs)]
+                    if idxdiff<=2 or 8<=idxdiff<=10:
+                        prob1 += np.log( mu[i, mcol]/mu[j,mcol] )
+                        prob2 += np.log( (1-mu[j,mcol])/(1-mu[i,mcol]) )
+                    
+                    elif 3<=idxdiff<=7:
+                        prob1 += np.log( (1-mu[i, mcol])/(1-mu[j,mcol]) )
+                        prob2 += np.log( mu[j,mcol]/mu[i,mcol] )
+                
 
+                if abs(prob1)>4.6 and abs(prob2)>4.6 and prob1*prob2>0:
+                    badidxs.append( (i,j,idx, abs(prob1+prob2)) )
+        
+        
         if len(badidxs) > 0:
-            raise ConvergenceError('Potential anticorrelated Mu artifact', self.step, badidxs)
+            # find the worst offender
+            worst = max(badidxs, key=lambda x:x[3])
+            
+            
+            # silence the column with the highest ratio
+            maxratio = 0
+            maxcol = 0
+            for m in range(11):
+                if (worst[2]+m)<len(activecols) and (activecols[worst[2]+m]-activecols[worst[2]])<11:
+                    mcol = activecols[worst[2]+m]
+                    ratio = abs( np.log( mu[worst[0],mcol] / mu[worst[1],mcol] ))
+                    if ratio > maxratio:
+                        maxratio = ratio
+                        maxcol = mcol
+                    
+            raise ConvergenceError('Anticorrelated Mu artifact', self.step, [maxcol])
 
 
 
