@@ -974,7 +974,7 @@ class EnsembleMap(object):
         null_model = SynBernoulliMixture(p=self.BMsolution.p, mu=mu)
         
         # generate synthetic reads 
-        nullEM = null_model.getEMobject(2*self.reads.shape[0], nodata_rate=0.1, 
+        nullEM = null_model.getEMobject(self.reads.shape[0], nodata_rate=0.1, 
                                         invalidcols=self.invalid_columns,
                                         verbal=False)
  
@@ -1135,7 +1135,7 @@ def parseArguments():
     fitopt.add_argument('--badcol_cutoff', type=int, default=5, help='Inactivate column after it causes a failure X number of times *after* a valid soln has already been found (default=5)')
     fitopt.add_argument('--writeintermediates', action='store_true', help='Write each BM solution to file with specified prefix. Will be saved as prefix-intermediate-[component]-[trial].bm')
 
-    fitopt.add_argument('--priorWeight', type=float, default=0.001, help='Weight of prior on Mu (default=0.001). Prior = priorWeight*readDepth*bgRate at each nt. Prior is disabled by passing -1, upon which a naive prior is used.')
+    fitopt.add_argument('--priorWeight', type=float, default=0.01, help='Weight of prior on Mu (default=0.01). Prior = priorWeight*readDepth*bgRate at each nt. Prior is disabled by passing -1, upon which a naive prior is used.')
     fitopt.add_argument('--maskG', action='store_true', help='set all Us to inactive')
     fitopt.add_argument('--maskU', action='store_true', help='set all Gs to inactive')
 
