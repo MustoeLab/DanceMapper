@@ -29,12 +29,13 @@ class EnsembleMap(object):
         self.reads = None 
         self.mutations = None
         
-        # Affialiated ReactivitProfile object
+        # Affiliated ReactivityProfile object
         self.profile=None
     
         # np.array of sequence positions to actively cluster 
         self.active_columns=None
         
+        # number of active columns at beginning of clustering
         self.initialActiveCount = 1
 
         # np.array of sequence positions to 'inactively' cluster
@@ -64,11 +65,12 @@ class EnsembleMap(object):
             self.ntindices = np.arange(1, seqlen+1, dtype=np.int32)
 
         
-        # first initialize reads/mutations, which will set mincoverage
+        # first initialize reads/mutations. 
+        # Note this will set mincoverage (can be specified through kwargs)
         if modfile is not None:
             self.readPrimaryData(modfile, **kwargs)
         
-        # if provided, now update profile.backprofile with rate computed 
+        # if provided, now update self.profile.backprofile with rate computed 
         # using reads filtered according to same criteria for primary data
         if untfile is not None:
             self.computeBGprofile(untfile, **kwargs)
@@ -130,13 +132,11 @@ class EnsembleMap(object):
     def checkDataIntegrity(self):
         """Check the reads and mutations conform to expected format"""
         
-        checksum = 0
         for n in xrange(self.numreads):
             mask = np.array(self.mutations[n,:], dtype=bool)
             if np.sum(self.reads[n,mask]) != np.sum(mask):
                 raise ValueError('Data integrity failure! Read and mutation arrays do not agree at read {}'.format(n))
-            else:
-                checksum += np.sum(mask)
+
 
 
     def computeBGprofile(self, untfilename, verbal=True, **kwargs):
@@ -174,6 +174,8 @@ class EnsembleMap(object):
         invalidrate = columns with rates below this value are set to invalid
         maxbg       = maximum allowable background signal
         minrxbg     = minimum signal above background
+        maskG       = set all G nts to inactive
+        maskU       = set all U nts to inactive
         verbal      = keyword to control printing of inactive nts
         """
         
@@ -183,7 +185,7 @@ class EnsembleMap(object):
         ###################################
         
         # copy so we don't modify argument
-        invalidcols = list(invalidcols[:])
+        invalidcols = list(invalidcols)
 
         if verbal and len(invalidcols)>0:
             print("Nts {} set invalid by user".format(self.ntindices[invalidcols]))
@@ -213,7 +215,7 @@ class EnsembleMap(object):
         if verbal and len(lowsignal)>0:
             print("Nts {} set to invalid due to low mutation rate".format(self.ntindices[lowsignal]))
         
-        
+        # check backprofile to exclude high bg positions
         highbg = []
         if self.profile is not None:
             for i, val in enumerate(self.profile.backprofile):
@@ -237,17 +239,19 @@ class EnsembleMap(object):
         ###################################
         
         inactive = []
-
+        
+        # copy user specified inactivecols, making sure non are invalid
         for i in inactivecols:
             if i not in self.invalid_columns:
                 inactive.append(i)
 
+
         if verbal and len(inactive) > 0:
             print("Nts set inactive by user: {}".format(self.ntindices[inactive]))
         
-
+        
+        # determine low reactivity cols
         lowrx = []
- 
         if self.profile is not None:
             with np.errstate(invalid='ignore'):
                 for i in np.where(self.profile.subprofile < minrxbg)[0]:
@@ -268,8 +272,7 @@ class EnsembleMap(object):
                     gcols.append(i)
                     inactive.append(i)
             
-            print('G columns set inactive:')
-            print gcols
+            print('Remaining G nts set inactive:'.format(self.ntindices[gcols]))
 
 
         if maskU:
@@ -278,9 +281,8 @@ class EnsembleMap(object):
                 if s == 'U' and i not in self.invalid_columns and i not in inactive:
                     ucols.append(i)
                     inactive.append(i)
-
-            print('U columns set inactive:')
-            print ucols
+            
+            print('Remaining U nts set inactive:'.format(self.ntindices[ucols]))
 
        
         inactive.sort()
@@ -324,22 +326,23 @@ class EnsembleMap(object):
             if len(self.invalid_columns) > 0:
                 print("Cols {} initialized to invalid in setColumns".format(self.invalid_columns))
 
-
+        # identify and delete any cols specified inactive that are invalid
         if inactivecols is not None and np.sum(np.isin(inactivecols, self.invalid_columns)) > 0:
             conflict = np.where(np.isin(inactivecols, self.invalid_columns))[0]
             print('WARNING! columns {} are invalid and cannot be set inactive'.format(inactivecols[conflict]))
             inactivecols = np.delete(inactivecols, conflict)
-            
+        
+        # identify and delete any active cols that are invalid
         if activecols is not None and np.sum(np.isin(activecols, self.invalid_columns)) > 0:
             conflict = np.where(np.isin(activecols, self.invalid_columns))[0]
             print('WARNING! columns {} are invalid and cannot be set active'.format(activecols[conflict]))
             activecols = np.delete(activecols, conflict)
          
 
-
+        # if both active and inactive are passed
         if activecols is not None and inactivecols is not None:
             
-            # if the same, don't do anything
+            # if active+inactive are same as self, don't do anything
             if np.array_equal(activecols, self.active_columns) and \
                     np.array_equal(inactivecols, self.inactive_columns):
                 return
@@ -358,30 +361,32 @@ class EnsembleMap(object):
             self.inactive_columns = np.array(inactivecols)
         
 
+        # if only activecols is passed
         elif activecols is not None:
             
+            # don't do anything if activecols is unchanged from self
             if np.array_equal(activecols, self.active_columns):
                 return
 
             self.active_columns = np.array(activecols)
-
-            indices = np.arange(self.seqlen)
             
+            # determine by process of elimination the inactive columns
+            indices = np.arange(self.seqlen)
             mask = np.isin(indices, self.active_columns, invert=True)
             mask = mask & np.isin(indices, self.invalid_columns, invert=True)
 
             self.inactive_columns = np.array(indices[mask])
         
-
+        # if only inactivecols is passed
         elif inactivecols is not None:
             
             if np.array_equal(inactivecols, self.inactive_columns):
                 return
 
             self.inactive_columns = np.array(inactivecols)
-
-            indices = np.arange(self.seqlen)
             
+            # determine by process of elimination the active columns
+            indices = np.arange(self.seqlen)
             mask = np.isin(indices, self.inactive_columns, invert=True)
             mask = mask & np.isin(indices, self.invalid_columns, invert=True)
 
@@ -430,24 +435,24 @@ class EnsembleMap(object):
 
 
 
-    def fitEM(self, components, trials=5, soln_termcount=3, badcolcount0=2, badcolcount=5, 
-              priorWeight=0.001, verbal=False, writeintermediate=None, forcefit=False, **kwargs):
+    def fitEM(self, components, trials=50, soln_termcount=3, badcolcount0=2, badcolcount=5, 
+              priorWeight=0.01, verbal=False, writeintermediate=None, forcefit=False, **kwargs):
         """Fit Bernoulli Mixture model of a specified number of components.
         Trys a number of random starting conditions. Terminates after finding a 
-        repeated valid solution, a repeated set of 'invalid' column solutions, 
-        or after a maximum number of trials.
+        repeated valid solution or after a maximum number of trials.
 
         components = number of model components to fit
         trials = max number of fitting trials to run
         soln_termcount = terminate after this many identical solutions founds
-        badcolcount0 = inactivate columns after this many failures with no valid solns
-        badcolcount  = inactivate columns after this many failures (with valid solns)
+        badcolcount0 = inactivate columns after this many failures when no valid soln has yet been found
+        badcolcount  = inactivate columns after this many failures if valid soln already found
         
         priorWeight = weight of relative prior used during fitting. If -1, disable
 
         writeintermediate = write out each BM soln to specified prefix
         verbal = T/F on whether to print results of each trial
-        
+        forcefit = try extra hard to fit specified number of components by relaxing thresholds
+
         additional kwargs are passed onto BernoulliMixture.fitEM
         
         returns:
@@ -466,6 +471,8 @@ class EnsembleMap(object):
         if verbal and priorWeight>0:
             print('Using priorWeight={0}'.format(priorWeight))
         
+
+        # allow extra leniency in column inactivation to achieve fit
         if forcefit:
             self.maxinactive=0.5
 
@@ -522,13 +529,13 @@ class EnsembleMap(object):
                     bestfit = BM
                     continue
                 
-                
+                # compute BIC of old bestfit with new active_columns if they have changed
                 bestfitBIC = self.compareBIC(BM, bestfit, verbal=verbal)
                 
-                # doesn't matter if active_columns are different; diff computed
-                # using the smallest list
+                # compute the difference betwene models
                 pdiff, mudiff = BM.modelDifference(bestfit, func=np.max)
-
+                
+                # if models are this close, then we have found the same soln
                 if pdiff < 0.03 and mudiff < 0.01:
                     bestfitcount += 1
                     if BM.BIC < bestfitBIC:
@@ -547,6 +554,8 @@ class EnsembleMap(object):
                 # (BM.cError.badcolumns will be empty if not badcolumn error)
                 badcolumns[BM.cError.badcolumns] += 1
                 
+                # identify columns to inactivate: use different thresholds depending
+                # whether or not we have found a soln (if soln already found, be more strict)
                 if len(fitlist)==0:
                     bc = np.where(badcolumns>=badcolcount0)[0]
                 else:
@@ -595,12 +604,21 @@ class EnsembleMap(object):
 
     
     def compareBIC(self, BMnew, BMold, verbal=False):
-        """Return BIC of BMold computed using the same set of active_columns as BMnew"""
+        """Return BIC of BMold computed using the same set of active_columns as BMnew
+        Note that for this method to work appropriately it requires that BMnew.active_columns
+        is a subset of BMold.active_columns. 
+            In the future, it might be good to update method so that it can take the
+            intersection of active_columns if we want to be able to compare non-hierachically 
+            solved models
+        
+        """
 
         # check if BMold has the same active_columns
         if np.array_equal(BMnew.active_columns, BMold.active_columns):
             return BMold.BIC
         
+        elif not np.all(np.isin(BMnew.active_columns, BMold.active_columns)):
+            raise ValueError('BMnew active_columns are not a ubset of BMold active_columns')
 
         # if we get here then we need to refit
         if verbal:  
@@ -631,7 +649,7 @@ class EnsembleMap(object):
             self.initializeActiveCols(verbal=True)
 
 
-        # best BernoulliMixture solution. Assign as 1-component solution to start
+        # Assign bestBM as 1-component solution to start
         overallBestBM = self.compute1ComponentModel()
         
 
@@ -786,13 +804,12 @@ class EnsembleMap(object):
         # eliminate invalid positions
         model.mu[:, self.invalid_columns] = np.nan
 
-        # create temporary profile containing maxs at each position to normalize
+        # create temporary profile containing maxs at each position to compute norm factors
         maxProfile = self.profile.copy()
         maxProfile.rawprofile = np.max(model.mu, axis=0)
         maxProfile.backgroundSubtract()
         normfactors = maxProfile.normalize(DMS=True)
 
-######## confirm that normalization is being done correctly !
 
         # now create new normalized profiles
         profiles = []
@@ -888,11 +905,13 @@ class EnsembleMap(object):
         window     = correlation window
         corrtype   = metric for computing correlations
         bgfile     = parsed mutation file for bg sample (to filter out bg mutations)
-        assignprob = posterior prob. used for assigning reads to models
+        assignprob = posterior prob. used for assigning reads to models. If -1, assign reads as MAP
+        subtractwindow = exclude nt window when assigning read for that window
+        montecarlo = sample reads using MC logic
         verbal     = verbal"""
 
         
-        # setup the activestatus mask
+        # setup the activestatus mask. Assign reads using both active & inactive cols
         activestatus = np.zeros(self.seqlen, dtype=np.int8)
         activestatus[self.active_columns] = 1
         activestatus[self.inactive_columns] = 1
@@ -945,9 +964,9 @@ class EnsembleMap(object):
             
             #ring.writeDataMatrices('ex', 't-{}-{}-{}-{}'.format(p,subtractwindow,assignprob,montecarlo))
 
-
             relist.append(ring)
         
+
         if verbal: print('\n')
 
         return relist
@@ -962,7 +981,9 @@ class EnsembleMap(object):
         window     = correlation window
         corrtype   = metric for computing correlations
         bgfile     = parsed mutation file for bg sample (to filter out bg mutations)
-        assignprob = posterior prob. used for assigning reads to models
+        assignprob = posterior prob. used for assigning reads to models. If -1, assign reads as MAP
+        subtractwindow = exclude nt window when assigning read for that window
+        montecarlo = sample reads using MC logic
         verbal     = verbal"""
 
        
@@ -979,7 +1000,7 @@ class EnsembleMap(object):
                                         verbal=False)
  
 
-        # setup the activestatus mask
+        # setup the activestatus mask. Assign reads using both active & inactive cols
         activestatus = np.zeros(self.seqlen, dtype=np.int8)
         activestatus[self.active_columns] = 1
         activestatus[self.inactive_columns] = 1
@@ -1031,10 +1052,11 @@ class EnsembleMap(object):
         Return list of RINGexperiment objects
 
         window     = correlation window
-        corrtype   = metric for computing correlations
         bgfile     = parsed mutation file for bg sample (to filter out bg mutations)
         assignprob = posterior prob. used for assigning reads to models
         nulldifftest = perform difference G-test against null model as well
+        subtractwindow = exclude nt window when assigning read for that window
+        montecarlo = sample reads using MC logic
         verbal     = verbal"""
  
 
@@ -1149,20 +1171,23 @@ def parseArguments():
     ringopt.add_argument('--window', type=int, default=1, help='Window size for computing correlations (default=1)')
 
     ringopt.add_argument('--pairmap', action='store_true', help='Run PAIR-MaP analysis on clustered reads') 
-    ringopt.add_argument('--readprob_cut', type=float, default=0.9, help='Posterior probability cutoff for assigning reads for inclusion in ring/pairmap analysis. Reads must have posterior prob greater than the cutoff (default=0.9)')
+    ringopt.add_argument('--readprob_cut', type=float, default=0.9, help='Posterior probability cutoff for assigning reads for inclusion in ring/pairmap analysis. Reads must have posterior prob greater than the cutoff (default=0.9). If set to -1, assign reads using maximum a posteriori (MAP) criteria')
     ringopt.add_argument('--chisq_cut', type=float, default=23.9, help="Set chisq cutoff for RING/PAIR-MaP analysis (default = 23.9)")
-    ringopt.add_argument('--nowindowsubtract', action='store_false')
+
+    # note the below logic is a bit confusing because the internal variables are different than
+    # external names. Internally, the variable is subtractWindow. By default this should be True.
+    # InclWindow is basically the negation of subtractWindow, so passing --inclwindow flag will set
+    # subtractWindow = False
+    ringopt.add_argument('--inclwindow', action='store_false', help='Include considered windows in read probability calculation and assignment. By default windows are EXCLUDED from calculations')
 
     ############################################################
     # Other options
     
-    optional.add_argument('--untreated_parsed', help='Path to modified parsed.mut file')
-
-    optional.add_argument('--readfromfile', type=str, help='Read in model from BM file')
+    optional.add_argument('--untreated_parsed', help='Path to untreated parsed.mut file')
+    optional.add_argument('--readfromfile', type=str, help='Read in solved BM model from BM file')
     optional.add_argument('--suppressverbal', action='store_false', help='Suppress verbal output')
     optional.add_argument('--outputprefix', type=str, default='emfit', help='Write output files with this prefix (default=emfit)')
     
-
 
     parser._action_groups.append(optional)
 
@@ -1191,8 +1216,7 @@ def parseArguments():
         sys.exit(1)
 
     ############################################################
-    # reformat arguments as necessary for downstream applications
-
+    # reformat writeintermediate bool flag as file prefix
     if args.writeintermediates:
         args.writeintermediates = args.outputprefix
     else:
@@ -1212,6 +1236,7 @@ def parseArguments():
 
 if __name__=='__main__':
     
+    # Log file messaging for keeping track of run info
     print(' '.join(sys.argv[:]))
     print('\nStarting up Ensemble-MaP')
     print('{:%Y-%m-%d %H:%M:%S}'.format(datetime.datetime.now()))
@@ -1265,7 +1290,7 @@ if __name__=='__main__':
 
     if args.ring:
 
-        RE_list = EM.computeRINGs(window=args.window, bgfile=args.untreated_parsed, subtractwindow=args.nowindowsubtract,
+        RE_list = EM.computeRINGs(window=args.window, bgfile=args.untreated_parsed, subtractwindow=args.inclwindow,
                                   assignprob=args.readprob_cut, verbal=args.suppressverbal)
 
         for i,model in enumerate(RE_list):
@@ -1278,7 +1303,7 @@ if __name__=='__main__':
         
         profiles = EM.computeNormalizedReactivities()
 
-        RE_list = EM.computeRINGs(window=3, bgfile=args.untreated_parsed, subtractwindow=args.nowindowsubtract,
+        RE_list = EM.computeRINGs(window=3, bgfile=args.untreated_parsed, subtractwindow=args.inclwindow,
                                   assignprob=args.readprob_cut, verbal=args.suppressverbal)
 
         for i,model in enumerate(RE_list):
