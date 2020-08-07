@@ -2,8 +2,8 @@
 import numpy as np
 import itertools, sys
 
-import ringmapperpath
-sys.path.append(ringmapperpath.path())
+import externalpaths
+sys.path.append(externalpaths.ringmapper())
 
 from EnsembleMap import EnsembleMap
 from BernoulliMixture import BernoulliMixture

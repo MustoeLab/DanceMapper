@@ -5,11 +5,11 @@ import itertools, sys, copy, time
 from collections import deque
 
 try:
-    import ringmapperpath
-    sys.path.append(ringmapperpath.path())
+    import externalpaths
+    sys.path.append(externalpaths.ringmapper())
     import accessoryFunctions
 except:
-    raise ImportError('Could not import accessoryFunctions! ringmapperpath is not set appropriately')
+    raise ImportError('Could not import accessoryFunctions! ringmapperpath is not set appropriately in externalpaths')
 
 
 

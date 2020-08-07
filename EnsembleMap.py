@@ -4,8 +4,8 @@ import sys, argparse, itertools
 import datetime
 
 # get path to functions needed for mutstring I/O
-import ringmapperpath
-sys.path.append(ringmapperpath.path())
+import externalpaths
+sys.path.append(externalpaths.ringmapper())
 
 
 import accessoryFunctions as aFunc
