@@ -1,6 +1,7 @@
 
 import numpy as np
 import matplotlib.pyplot as plot
+import matplotlib.patches as mpatches
 
 import sys, itertools
 from scipy import stats
@@ -263,21 +264,28 @@ def plotClusterProfile(clustobj, out=None, modelNums=None):
         with np.errstate(invalid='ignore'):
             mask = clustobj.rawprofiles[i]>-1
 
-        ax.step(xvals[mask], clustobj.rawprofiles[i][mask], label='{0:.2f}'.format(p), where='mid')
+        ax.step(xvals[mask], clustobj.rawprofiles[i][mask], label='p={0:.2f}'.format(p), where='mid')
    
     for c in mergeColumns(clustobj.inactive_columns):
         ax.axvspan(c[0],c[1], color='gray', alpha=0.2)
     
     for c in mergeColumns(clustobj.invalid_columns):
-        ax.axvspan(c[0],c[1], color='gray', alpha=0.4)
+        ax.axvspan(c[0],c[1], color='gray', alpha=0.6)
 
     print("Sample comparison:")
     print("-----------------------")
     printPearson(clustobj, clustobj)
 
+    
+    handles, labels = ax.get_legend_handles_labels()
+    patch1 = mpatches.Patch(color='gray', alpha=0.2, label='Inactive Nts')
+    patch2 = mpatches.Patch(color='gray', alpha=0.6, label='Invalid Nts')
+    handles.extend([patch1, patch2]) 
 
-
-    ax.legend()
+    ax.legend(handles=handles)
+    
+    ax.set_xlabel('Nts')
+    ax.set_ylabel('Mu (mutation rate)')
 
     if out is None:
         plot.show()
@@ -316,15 +324,27 @@ def plotClusterComparison(clust1, clust2, name1='', name2='', out=None, align=Fa
             ax[i].axvspan(c[0],c[1], color='gray', alpha=0.2)
         
         for c in mergeColumns(clust1.invalid_columns):
-            ax[i].axvspan(c[0],c[1], color='gray', alpha=0.4)
+            ax[i].axvspan(c[0],c[1], color='gray', alpha=0.6)
         
 
         corrcoef = stats.pearsonr(clust1.rawprofiles[i][mask], clust2.rawprofiles[c2idx[i]][mask])
         ax[i].text(0.02,0.9,'R={:.3f}'.format(corrcoef[0]), transform=ax[i].transAxes)
-
-        ax[i].legend(loc='upper right')
         
+        ax[i].set_ylabel('Mu (mutation rate)')
+
+
+        handles, labels = ax[i].get_legend_handles_labels()
+
+        if i==0:
+            patch1 = mpatches.Patch(color='gray', alpha=0.2, label='Inactive Nts ({})'.format(name1))
+            patch2 = mpatches.Patch(color='gray', alpha=0.6, label='Invalid Nts ({})'.format(name1))
+            handles.extend([patch1, patch2]) 
+
+        ax[i].legend(handles=handles, loc='upper right')
     
+
+    ax[-1].set_xlabel('Nts')
+
 
     print("Sample1 comparison:")
     print("-----------------------")
@@ -338,7 +358,8 @@ def plotClusterComparison(clust1, clust2, name1='', name2='', out=None, align=Fa
     print("-----------------------")
     printPearson(clust1, clust2)
 
-
+ 
+        
     if out is None:
         plot.show(fig)
     else:
@@ -387,6 +408,7 @@ def plotProfileComparison(fname, out=None, modelNums=None):
 
     data = []
     seq = []
+    inactives=[]
     with open(fname) as inp:
         inp.readline()
         p = map(float, inp.readline().split()[1:])
@@ -396,6 +418,10 @@ def plotProfileComparison(fname, out=None, modelNums=None):
             spl = line.split()
             seq.append(spl[1])
             data.append([float(spl[2+2*i]) for i in range(len(p))])
+            
+            if spl[-1] == 'i':
+                inactives.append(int(spl[0])-1)
+    
 
     data = np.array(data)
     
@@ -414,26 +440,34 @@ def plotProfileComparison(fname, out=None, modelNums=None):
         ax.step(xvals[mask], data[mask,i], where='mid',
                 label='p={:.2f}'.format(p))
     
-    ax.legend()
+    
+    for c in mergeColumns(np.where(np.isnan(data[:,0]))[0]):
+        ax.axvspan(c[0],c[1], color='gray', alpha=0.6)
+    
+    for c in mergeColumns(inactives):
+        ax.axvspan(c[0],c[1], color='gray', alpha=0.2)
+
+    handles, labels = ax.get_legend_handles_labels()
+    patch1 = mpatches.Patch(color='gray', alpha=0.2, label='Inactive Nts')
+    patch2 = mpatches.Patch(color='gray', alpha=0.6, label='Invalid Nts')
+    handles.extend([patch1, patch2]) 
+
+    ax.legend(handles=handles)
+    
+
     ax.set_ylim(-0.1, 2)
     ax.set_xticks(np.arange(0,xvals[-1],10), minor=True)
     ax.grid(lw=0.25, which='minor')
+    
+
+    ax.set_xlabel('Nts')
+    ax.set_ylabel('Normalized Reactivity')
+
 
     if out is None:
         plot.show()
     else:
         fig.savefig(out)
-
-
-def printratio(model):
-    
-    for k in range(model.rawprofiles.shape[1]):
-        
-        minval = np.min(model.rawprofiles[:,k])
-        maxval = np.max(model.rawprofiles[:,k])
-        print k+1, maxval/minval
-        
-
 
 
 
@@ -443,14 +477,14 @@ if __name__ == '__main__':
     
     import argparse
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--ref')
-    parser.add_argument('--comp')
-    parser.add_argument('--out')
-    parser.add_argument('--react')
-    parser.add_argument('--align', action='store_true')
-    parser.add_argument('--models')
-    parser.add_argument('--ratio', action='store_true')
+    parser = argparse.ArgumentParser(description='Plot and/or compare BM files')
+    parser.add_argument('--bm1', help="Path of first bm file")
+    parser.add_argument('--bm2', help="Path of second bm file (optional)")
+    parser.add_argument('--react1', help='Plot -reactivities.txt file (instead of BM file)')
+
+    parser.add_argument('--out', help='Write figure to file. If --out flag not used, plot using interactive GUI')
+    parser.add_argument('--align', action='store_true', help='Align bm1 and bm2 based on reactivity (rather than population)')
+    parser.add_argument('--models', help='Only plot the specified models. E.g. --models 0,2 will plot models 0 and 2 for a 3 component model. Only works when visualizing single bm or react.')
 
     args = parser.parse_args()
     
@@ -458,23 +492,18 @@ if __name__ == '__main__':
         args.models = map(int, args.models.split(','))
 
 
-    if args.ratio:
-        printratio(Cluster(args.ref))
+    if args.bm1 and not args.bm2:
+        plotClusterProfile( Cluster(args.bm1), args.out, modelNums=args.models )
 
 
-    if args.ref and not args.comp:
-        plotClusterProfile( Cluster(args.ref), args.out, modelNums=args.models )
+    if args.bm1 and args.bm2:
 
-
-    if args.ref and args.comp:
-
-        plotClusterComparison( Cluster(args.ref),  Cluster(args.comp), 
-                               name1 = args.ref, name2= args.comp, 
+        plotClusterComparison( Cluster(args.bm1),  Cluster(args.bm2), 
+                               name1 = args.bm1, name2= args.bm1, 
                                out = args.out, align=args.align)
 
-    if args.react:
-        
-        plotProfileComparison( args.react, args.out, modelNums=args.models)
+    if args.react1:
+        plotProfileComparison( args.react1, args.out, modelNums=args.models)
         
 
 

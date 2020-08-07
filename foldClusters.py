@@ -1,6 +1,6 @@
 
 
-import sys, subprocess, argparse
+import sys, subprocess, argparse, os
 import numpy as np
 import externalpaths
 
@@ -9,10 +9,13 @@ from plotClusters import RPCluster
 
 sys.path.append(externalpaths.arcplot())
 from arcPlot import ArcPlot
+from pmanalysis import PairMap
 
 sys.path.append(externalpaths.rnatools())
 import RNAtools2 as RNAtools
 import foldPK
+
+
 
 
 
@@ -53,15 +56,14 @@ def writeFiles(clusters, outprefix, nog=False, nou=False):
 
 def parseArgs():
 
-    prs = argparse.ArgumentParser()
+    prs = argparse.ArgumentParser(description='Perform RNAstructure modeling and plot results for all models from a BM')
 
-    prs.add_argument('inputReactivity',type=str, help="Path of clustering reactivity file")
-    prs.add_argument('output', type=str, help='Prefix for writing files')
-    prs.add_argument('--bp', type=str, help='Prefix for bp files (i.e. for test-0-pairmap.txt pass test)')
-    prs.add_argument('--pk', action='store_true', help='fold using ShapeKnots')
-    prs.add_argument('--nog', action='store_true', help='mask gs for folding')
-    prs.add_argument('--nou', action='store_true', help='mask us for folding')
-    prs.add_argument('--renorm', action='store_true', help='renormalize reactivities')
+    prs.add_argument('inputReactivity',type=str, help="Path of clustering reactivity file (-reactivities.txt)")
+    prs.add_argument('output', type=str, help='Prefix for writing output files')
+    prs.add_argument('--bp', type=str, help="Prefix for bp files. I.e. if your pairmap files are test-[]-pairmap.bp, you should pass '--bp test'")
+    prs.add_argument('--pk', action='store_true', help='fold using ShapeKnots (default is to use Fold)')
+    prs.add_argument('--nog', action='store_true', help='mask Gs (set to no-data)')
+    prs.add_argument('--nou', action='store_true', help='mask Us (set to no-data)')
 
     return prs.parse_args()
 
@@ -72,13 +74,18 @@ if __name__=='__main__':
 
     args = parseArgs()
 
-    foldpath= '/Users/anthonymustoe/Code/RNAstructure/exe/fold'
+    foldpath = externalpaths.rnastructure()+'/fold'
+    skpath = externalpaths.rnastructure()+'/ShapeKnots'
+
+    if not args.pk and not os.path.isfile(foldpath):
+        exit('Path to RNAstructure:fold is invalid! Check directory path in externalpaths!')
+
+    elif args.pk and not os.path.isfile(skpath):
+        exit('Path to RNAstructure:ShapeKnots is invalid! Check directory path in externalpaths!')
+
+
 
     clusters = RPCluster(args.inputReactivity)   
-
-    if args.renorm:
-        clusters.renormalize()
-
 
     seqfile, dmsfiles = writeFiles(clusters, args.output, nog=args.nog, nou=args.nou)
 
@@ -90,14 +97,15 @@ if __name__=='__main__':
 
             if args.bp:
                 command.extend(('-x', args.bp+'-{}-pairmap.bp'.format(i)))
-            print command
+            print(command)
             subprocess.call(command)
 
         else:
             if args.bp:
-                foldPK.iterativeShapeKnots(seqfile, dfile[:-4], dmsfile=dfile, bpfile=args.bp+'-{}-pairmap.bp'.format(i))
+                foldPK.iterativeShapeKnots(skpath, seqfile, dfile[:-4], dmsfile=dfile, 
+                                           bpfile=args.bp+'-{}-pairmap.bp'.format(i))
             else:
-                foldPK.iterativeShapeKnots(seqfile, dfile[:-4], dmsfile=dfile)
+                foldPK.iterativeShapeKnots(skpath, seqfile, dfile[:-4], dmsfile=dfile)
 
 
         aplot = ArcPlot(title = '{} P={:.3f}'.format(args.output, clusters.population[i]))
@@ -109,6 +117,10 @@ if __name__=='__main__':
 
         aplot.addCT( RNAtools.CT(finalname) )
         aplot.readDMSProfile(dfile)
+
+        if args.bp:
+            aplot.addPairMap( PairMap(args.bp+'-{}-pairmap.txt'.format(i)), panel=-1)
+
         aplot.writePlot( dfile[:-4]+'.pdf')
 
 
