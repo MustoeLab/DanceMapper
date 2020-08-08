@@ -14,7 +14,7 @@ Kevin Weeks Lab
 University of North Carolina
 
 Contact: anthony.mustoe@bcm.edu
------------------------------------------
+
 
 
 General Description
@@ -44,15 +44,15 @@ User-facing Programs
 ---------------------
 The following programs have command line interfaces:
 
-## EnsembleMap.py
+### EnsembleMap.py
 Main clustering script. Run EnsembleMap.py --help for usage information
 
-## plotClusters.py 
+### plotClusters.py 
 Script for visualizing and comparing the reactivites of EnsembleMaP identified clusters.
 (Makes step plots, also known as skyline plots).
 Run plotClusters.py --help for usage information
 
-## foldClusters.py
+### foldClusters.py
 Script for performing RNAstructure modeling based on clustered reactivities and plotting results 
 using arcPlot. Takes -reactivities.txt file as input. Can also accept -pairmap.bp restraints. 
 
