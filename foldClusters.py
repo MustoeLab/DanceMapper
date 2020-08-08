@@ -74,7 +74,7 @@ if __name__=='__main__':
 
     args = parseArgs()
 
-    foldpath = externalpaths.rnastructure()+'/fold'
+    foldpath = externalpaths.rnastructure()+'/Fold'
     skpath = externalpaths.rnastructure()+'/ShapeKnots'
 
     if not args.pk and not os.path.isfile(foldpath):

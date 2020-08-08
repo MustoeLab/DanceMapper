@@ -1,9 +1,14 @@
 
 import numpy as np
+
+
+import matplotlib 
+matplotlib.use('Agg')
+
 import matplotlib.pyplot as plot
 import matplotlib.patches as mpatches
-
 import sys, itertools
+
 from scipy import stats
 
 from BernoulliMixture import BernoulliMixture
