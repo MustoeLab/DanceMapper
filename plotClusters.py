@@ -504,7 +504,7 @@ if __name__ == '__main__':
     if args.bm1 and args.bm2:
 
         plotClusterComparison( Cluster(args.bm1),  Cluster(args.bm2), 
-                               name1 = args.bm1, name2= args.bm1, 
+                               name1 = args.bm1, name2= args.bm2, 
                                out = args.out, align=args.align)
 
     if args.react1:
