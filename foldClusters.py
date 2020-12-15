@@ -21,14 +21,13 @@ import foldPK
 
 def writeFiles(clusters, outprefix, nog=False, nou=False):
 
-    seqfilename = '{0}.seq'.format(outprefix)
+    seqfilename = '{0}.fa'.format(outprefix)
 
     with open(seqfilename, 'w') as seqfile:
-        seqfile.write(';\nsequence\n')
+        seqfile.write('>sequence\n')
         
         for n in clusters.profiles[0].sequence:
             seqfile.write(n)
-        seqfile.write('1')
 
     
     dmsfilenames = []
@@ -61,6 +60,7 @@ def parseArgs():
     prs.add_argument('inputReactivity',type=str, help="Path of clustering reactivity file (-reactivities.txt)")
     prs.add_argument('output', type=str, help='Prefix for writing output files')
     prs.add_argument('--bp', type=str, help="Prefix for bp files. I.e. if your pairmap files are test-[]-pairmap.bp, you should pass '--bp test'")
+    prs.add_argument('--prob', action='store_true', help='compute pairing probability (partition)')
     prs.add_argument('--pk', action='store_true', help='fold using ShapeKnots (default is to use Fold)')
     prs.add_argument('--nog', action='store_true', help='mask Gs (set to no-data)')
     prs.add_argument('--nou', action='store_true', help='mask Us (set to no-data)')
@@ -76,13 +76,20 @@ if __name__=='__main__':
 
     foldpath = externalpaths.rnastructure()+'/fold'
     skpath = externalpaths.rnastructure()+'/ShapeKnots'
-
+    pfunpath = externalpaths.rnastructure()+'/partition'
+    pplotpath = externalpaths.rnastructure()+'/ProbabilityPlot'
+ 
     if not args.pk and not os.path.isfile(foldpath):
         exit('Path to RNAstructure:fold is invalid! Check directory path in externalpaths!')
 
     elif args.pk and not os.path.isfile(skpath):
         exit('Path to RNAstructure:ShapeKnots is invalid! Check directory path in externalpaths!')
-
+    
+    elif args.prob:
+        if not os.path.isfile(pfunpath):
+            exit('Path to RNAstructure:partition is invalid! Check directory path in externalpaths!')
+        elif not os.path.isfile(pplotpath):
+            exit('Path to RNAstructure:ProbabilityPlot is invalid! Check directory path in externalpaths!')
 
 
     clusters = RPCluster(args.inputReactivity)   
@@ -91,8 +98,20 @@ if __name__=='__main__':
 
 
     for i,dfile in enumerate(dmsfiles):
+            
+        if args.prob:
+            command = [pfunpath, seqfile, dfile[:-4]+'.pfs', '--dmsnt', dfile]
+            if args.bp:
+                command.extend(('-x', args.bp+'-{}-pairmap.bp'.format(i)))
+            print(command)
+            subprocess.call(command)
+            
+            command = [pplotpath, '-t', dfile[:-4]+'.pfs', dfile[:-4]+'.dp']
+            print(command)
+            subprocess.call(command)
+            
 
-        if not args.pk:
+        elif not args.pk:
             command = [foldpath, seqfile, dfile[:-4]+'.ct', '--dmsnt', dfile]
 
             if args.bp:
@@ -108,14 +127,16 @@ if __name__=='__main__':
                 foldPK.iterativeShapeKnots(skpath, seqfile, dfile[:-4], dmsfile=dfile)
 
 
-        aplot = ArcPlot(title = '{} P={:.3f}'.format(args.output, clusters.population[i]))
-
-        if args.pk:
-            finalname = dfile[:-4]+'.f.ct'
+        aplot = ArcPlot(title = '{} P={:.3f}'.format(args.output, clusters.population[i]), fasta=seqfile)
+        
+        if args.prob:
+            aplot.addPairProb( RNAtools.DotPlot(dfile[:-4]+'.dp') )
+        elif args.pk:
+            aplot.addCT( RNAtools.CT(dfile[:-4]+'.f.ct') )
         else:
-            finalname = dfile[:-4]+'.ct'
+            aplot.addCT( RNAtools.CT(dfile[:-4]+'.ct') )
 
-        aplot.addCT( RNAtools.CT(finalname) )
+
         aplot.readDMSProfile(dfile)
 
         if args.bp:
