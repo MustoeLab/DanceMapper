@@ -138,6 +138,7 @@ class RPCluster(object):
             bg = []
             norm = [[] for x in range(ncomp)]
             raw = [[] for x in range(ncomp)]
+            inactives = []
             
             population = np.array(map(float,inp.readline().split()[1:]))
             inp.readline()
@@ -151,8 +152,12 @@ class RPCluster(object):
                 for i in range(ncomp):
                     norm[i].append(float(spl[2+2*i]))
                     raw[i].append(float(spl[3+2*i]))
-                
+                    
+                    if spl[-1] == 'i':
+                        inactives.append(int(spl[0])-1)
+
                 bg.append(float(spl[4+2*i]))
+
 
 
         bg = np.array(bg)
@@ -177,6 +182,8 @@ class RPCluster(object):
         self.population = population
         self.profiles = profiles
         self.nclusts = self.population.shape[0]
+        self.inactive_columns = inactives
+        self.invalid_columns = []
 
     
     def renormalize(self):
@@ -239,7 +246,7 @@ class RPCluster(object):
         return minidx
 
  
-    def computePearson(self, clust2, sidx, cidx):
+    def computePearson(self, clust2, sidx, cidx, ptype=None):
         
         #idx = self.alignModel(clust2)
 
@@ -249,11 +256,23 @@ class RPCluster(object):
             mask = mask & np.isfinite(self.profiles[sidx].rawprofile) & (self.profiles[sidx].rawprofile>-1)
             mask = mask & np.isfinite(clust2.profiles[sidx].rawprofile) & (clust2.profiles[cidx].rawprofile>-1)
         
-        r,p = stats.pearsonr(self.profiles[sidx].subprofile[mask], clust2.profiles[cidx].subprofile[mask])
+        prof1 = self.profiles[sidx].profile(ptype)
+        prof2 = clust2.profiles[cidx].profile(ptype)
+        r,p = stats.pearsonr(prof1[mask], prof2[mask])
 
         return r    
 
+    
 
+    def printPearson(self, clust2, ptype=None):
+
+        for i,pi in enumerate(self.population):
+            for j,pj in enumerate(clust2.population):
+                print("{0} {1:.3f}, {2} {3:.3f} : {4:.2f}".format(i,pi,j,pj, self.computePearson(clust2,i,j, ptype)))
+   
+
+
+ 
 
 
 def plotClusterProfile(clustobj, out=None, modelNums=None):
@@ -381,7 +400,7 @@ def printPearson(clust1, clust2):
                 mask = (clust1.rawprofiles[i]>-1) & (clust2.rawprofiles[j]>-1)
      
             corrcoef = stats.pearsonr(clust1.rawprofiles[i][mask], clust2.rawprofiles[j][mask])
-            print("{0} {1:.3f}, {2} {3:.3f} : {4:.2f}".format(i,pi,j,pj,corrcoef[0]))
+            print("{0} {1:.3f}, {2} {3:.3f} : {4:.2f}".format(i,pi,j,pj,corrcoef))
    
 
 
@@ -409,47 +428,28 @@ def mergeColumns(columns):
 
 
 
-def plotProfileComparison(fname, out=None, modelNums=None):
+def plotReactProfile(rpclust, out=None, modelNums=None, ptype=None):
 
-    data = []
-    seq = []
-    inactives=[]
-    with open(fname) as inp:
-        inp.readline()
-        p = map(float, inp.readline().split()[1:])
-        inp.readline()
-
-        for line in inp:
-            spl = line.split()
-            seq.append(spl[1])
-            data.append([float(spl[2+2*i]) for i in range(len(p))])
-            
-            if spl[-1] == 'i':
-                inactives.append(int(spl[0])-1)
-    
-
-    data = np.array(data)
-    
     fig, ax = plot.subplots()
     
-    xvals = 1+np.arange(len(seq))
+    xvals = rpclust.profiles[0].nts 
     
-    for i,p in enumerate(p):
+    for i,p in enumerate(rpclust.population):
         
         if modelNums is not None and i not in modelNums:
             continue
 
         with np.errstate(invalid='ignore'):
-            mask = data[:,i] >-1
+            mask = rpclust.profiles[i].normprofile >-1
         
-        ax.step(xvals[mask], data[mask,i], where='mid',
-                label='p={:.2f}'.format(p))
+        prof = rpclust.profiles[i].profile(ptype)
+        ax.step(xvals[mask], prof[mask], where='mid', label='p={:.2f}'.format(p))
     
     
-    for c in mergeColumns(np.where(np.isnan(data[:,0]))[0]):
+    for c in mergeColumns(np.where(np.isnan(rpclust.profiles[0].normprofile))[0]):
         ax.axvspan(c[0],c[1], color='gray', alpha=0.6)
     
-    for c in mergeColumns(inactives):
+    for c in mergeColumns(rpclust.inactive_columns):
         ax.axvspan(c[0],c[1], color='gray', alpha=0.2)
 
     handles, labels = ax.get_legend_handles_labels()
@@ -460,7 +460,7 @@ def plotProfileComparison(fname, out=None, modelNums=None):
     ax.legend(handles=handles)
     
 
-    ax.set_ylim(-0.1, 2)
+    #ax.set_ylim(-0.1, 2)
     ax.set_xticks(np.arange(0,xvals[-1],10), minor=True)
     ax.grid(lw=0.25, which='minor')
     
@@ -477,6 +477,78 @@ def plotProfileComparison(fname, out=None, modelNums=None):
 
 
 
+def plotReactProfileComparison(rp1, rp2, name1='', name2='', ptype=None, out=None, align=False):
+
+    
+    xvals = rp1.profiles[0].nts
+    
+    fig, ax = plot.subplots(nrows=max(2,len(rp1.population)), ncols=1)
+   
+    if align:
+        c2idx = rp1.alignModel(rp2)
+    else:
+        c2idx = np.arange(len(rp2.population))
+    
+
+    for i,p in enumerate(rp1.population):
+        
+        with np.errstate(invalid='ignore'):
+            mask = (rp1.profiles[i].rawprofile>-1) & (rp2.profiles[i].rawprofile>-1)
+        
+        prof1 = rp1.profiles[i].profile(ptype)
+        prof2 = rp2.profiles[i].profile(ptype)
+
+        ax[i].step(xvals[mask], prof1[mask], where='mid', label='{0} p={1:.2f}'.format(name1, p))
+        ax[i].step(xvals[mask], prof2[mask], where='mid', label='{0} p={1:.2f}'.format(name2, rp2.population[c2idx[i]]))
+        
+
+        for c in mergeColumns(rp1.inactive_columns):
+            ax[i].axvspan(c[0],c[1], color='gray', alpha=0.2)
+        
+        for c in mergeColumns(rp1.invalid_columns):
+            ax[i].axvspan(c[0],c[1], color='gray', alpha=0.6)
+        
+
+        corrcoef = rp1.computePearson(rp2, i, c2idx[i], ptype)
+        ax[i].text(0.02,0.9,'R={:.3f}'.format(corrcoef), transform=ax[i].transAxes)
+        
+        ax[i].set_ylabel('Mu (mutation rate)')
+
+
+        handles, labels = ax[i].get_legend_handles_labels()
+
+        if i==0:
+            patch1 = mpatches.Patch(color='gray', alpha=0.2, label='Inactive Nts ({})'.format(name1))
+            patch2 = mpatches.Patch(color='gray', alpha=0.6, label='Invalid Nts ({})'.format(name1))
+            handles.extend([patch1, patch2]) 
+
+        ax[i].legend(handles=handles, loc='upper right')
+    
+
+    ax[-1].set_xlabel('Nts')
+
+
+    print("Sample1 comparison:")
+    print("-----------------------")
+    rp1.printPearson(rp1)
+
+    print("Sample2 comparison:")
+    print("-----------------------")
+    rp2.printPearson(rp2)
+
+    print("Intersample comparison:")
+    print("-----------------------")
+    rp1.printPearson(rp2)
+
+        
+    if out is None:
+        plot.show(fig)
+    else:
+        fig.savefig(out)
+
+
+
+
 
 if __name__ == '__main__':
     
@@ -486,6 +558,8 @@ if __name__ == '__main__':
     parser.add_argument('--bm1', help="Path of first bm file")
     parser.add_argument('--bm2', help="Path of second bm file (optional)")
     parser.add_argument('--react1', help='Plot -reactivities.txt file (instead of BM file)')
+    parser.add_argument('--react2', help='Path of second reactivities file')
+    parser.add_argument('--ptype', type=str, help='Which data to plot from reactivities file. Can be norm/raw')
 
     parser.add_argument('--out', help='Write figure to file. If --out flag not used, plot using interactive GUI')
     parser.add_argument('--align', action='store_true', help='Align bm1 and bm2 based on reactivity (rather than population)')
@@ -507,9 +581,13 @@ if __name__ == '__main__':
                                name1 = args.bm1, name2= args.bm2, 
                                out = args.out, align=args.align)
 
-    if args.react1:
-        plotProfileComparison( args.react1, args.out, modelNums=args.models)
+    if args.react1 and not args.react2:
+        plotReactProfile( RPCluster(args.react1), args.out, modelNums=args.models, ptype=args.ptype)
         
-
+    elif args.react1 and args.react2:
+        plotReactProfileComparison( RPCluster(args.react1), RPCluster(args.react2), 
+                                    name1 = args.react1, name2= args.react2,
+                                    out=args.out, align=args.align, ptype=args.ptype)
+     
 
         
