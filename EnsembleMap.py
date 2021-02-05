@@ -1073,7 +1073,25 @@ class EnsembleMap(object):
                                 subtractwindow=subtractwindow, montecarlo=montecarlo, verbal=verbal) 
 
 
-        # iterate through each model and mask out corrs present in the null model
+
+        # mask out corrs present in the null model
+        for p in range(self.BMsolution.pdim):
+            
+            # p=0.001 for df=1
+            for (i,j) in null[p].significantCorrelations('ex', 10.83):
+                
+                if verbal:
+                    print('Pair ({},{}) ignored due to chi2={:.1f} correlation in null model={}'.format(i+1,j+1, null[p].ex_correlations[i,j], p))
+                
+                for k in range(self.BMsolution.pdim):
+                    sample[k].ex_correlations[i,j] = np.ma.masked
+                    sample[k].ex_correlations[j,i] = np.ma.masked
+                    sample[k].ex_zscores[i,j] = np.ma.masked
+                    sample[k].ex_zscores[j,i] = np.ma.masked
+            
+
+
+        # now test for significant difference in distributiosn
         for p in range(self.BMsolution.pdim):
             
             sample_p = sample[p]
@@ -1081,23 +1099,21 @@ class EnsembleMap(object):
             
             for i,j in itertools.combinations(range(self.seqlen), 2):
 
-                nullcorr = null_p.ex_correlations[i,j]
                 nulldiff = sample_p.significantDifference(i,j, null_p.ex_readarr[i,j], null_p.ex_inotjarr[i,j],
                                                           null_p.ex_inotjarr[j,i], null_p.ex_comutarr[i,j])
                 
-                
-                # p=0.001 for df=1 and df=3, respectively
-                if nullcorr>10.83 or nulldiff < 16.27:
+                # p=0.001 for df=3
+                if nulldiff < 16.27:
 
                     if verbal and sample_p.ex_correlations[i,j]>23.93:
-                        outstr='Model {}: Correlated pair ({},{}) w/ chi2={:.1f} ignored: NULL correlation chi2={:.1f} ; NULL difference chi2={:.1f}'.format(p,i+1,j+1, sample_p.ex_correlations[i,j], nullcorr, nulldiff)
-                        print(outstr)
+                        print('Model {}: Correlated pair ({},{}) w/ chi2={:.1f} ignored: NULL difference chi2={:.1f}'.format(p,i+1,j+1, sample_p.ex_correlations[i,j], nullcorr, nulldiff))
                 
                     sample_p.ex_correlations[i,j] = np.ma.masked
                     sample_p.ex_correlations[j,i] = np.ma.masked
                     sample_p.ex_zscores[i,j] = np.ma.masked
                     sample_p.ex_zscores[j,i] = np.ma.masked
             
+
         return sample
                                      
 
