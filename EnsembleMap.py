@@ -974,7 +974,7 @@ class EnsembleMap(object):
  
 
     def _null_RINGs(self, window=1, corrtype='g', assignprob=0.9, 
-                    subtractwindow=True, montecarlo=False, verbal=True):
+                    subtractwindow=True, montecarlo=False, verbal=False):
         """Create null (uncorrelated) model and assign reads based on posterior prob 
         to determine null-model correlations. 
         Returns list of RINGexperiment objs
@@ -998,8 +998,7 @@ class EnsembleMap(object):
         nullEM = null_model.getEMobject(self.reads.shape[0], nodata_rate=0.1, 
                                         invalidcols=self.invalid_columns,
                                         verbal=False)
- 
-
+        
         # setup the activestatus mask. Assign reads using both active & inactive cols
         activestatus = np.zeros(self.seqlen, dtype=np.int8)
         activestatus[self.active_columns] = 1
@@ -1028,7 +1027,7 @@ class EnsembleMap(object):
         # populate RINGexperiment objects
         for p in xrange(self.BMsolution.pdim):
 
-            ring = RINGexperiment(arraysize=self.seqlen, corrtype=corrtype, verbal=False)
+            ring = RINGexperiment(arraysize=self.seqlen, corrtype=corrtype, verbal=verbal)
 
             ring.sequence = self.sequence
 
@@ -1037,7 +1036,7 @@ class EnsembleMap(object):
             ring.ex_comutarr = comut[p]
             ring.ex_inotjarr = inotj[p]
             
-            ring.computeCorrelationMatrix(mincount=10, ignorents=self.invalid_columns)
+            ring.computeCorrelationMatrix(mincount=10, ignorents=self.invalid_columns, verbal=verbal)
             #ring.writeDataMatrices('ex', 'null-{}.txt'.format(p))
             relist.append(ring)
             
@@ -1070,7 +1069,7 @@ class EnsembleMap(object):
 
         # compute correlations from null model (clustering only w/o correlations)
         null = self._null_RINGs(window=window, assignprob=assignprob, 
-                                subtractwindow=subtractwindow, montecarlo=montecarlo, verbal=verbal) 
+                                subtractwindow=subtractwindow, montecarlo=montecarlo) 
 
 
 
@@ -1106,7 +1105,7 @@ class EnsembleMap(object):
                 if nulldiff < 16.27:
 
                     if verbal and sample_p.ex_correlations[i,j]>23.93:
-                        print('Model {}: Correlated pair ({},{}) w/ chi2={:.1f} ignored: NULL difference chi2={:.1f}'.format(p,i+1,j+1, sample_p.ex_correlations[i,j], nullcorr, nulldiff))
+                        print('Model {}: Correlated pair ({},{}) w/ chi2={:.1f} ignored: NULL difference chi2={:.1f}'.format(p,i+1,j+1, sample_p.ex_correlations[i,j], nulldiff))
                 
                     sample_p.ex_correlations[i,j] = np.ma.masked
                     sample_p.ex_correlations[j,i] = np.ma.masked
@@ -1305,6 +1304,10 @@ if __name__=='__main__':
 
 
     if args.ring:
+        
+        if args.suppressverbal:
+                print('--------------Computing RINGs--------------')
+
 
         RE_list = EM.computeRINGs(window=args.window, bgfile=args.untreated_parsed, subtractwindow=args.inclwindow,
                                   assignprob=args.readprob_cut, verbal=args.suppressverbal)
@@ -1318,6 +1321,10 @@ if __name__=='__main__':
     if args.pairmap:
         
         profiles = EM.computeNormalizedReactivities()
+        
+        if args.suppressverbal:
+                print('--------------Computing PAIRs--------------')
+
 
         RE_list = EM.computeRINGs(window=3, bgfile=args.untreated_parsed, subtractwindow=args.inclwindow,
                                   assignprob=args.readprob_cut, verbal=args.suppressverbal)
@@ -1325,7 +1332,7 @@ if __name__=='__main__':
         for i,model in enumerate(RE_list):
             
             if args.suppressverbal:
-                print('--------------Computing PAIRs : Model {}--------------'.format(i))
+                print('*******Model {}*******'.format(i))
 
 
             model.writeCorrelations('{0}-{1}-allcorrs.txt'.format(args.outputprefix,i), 
