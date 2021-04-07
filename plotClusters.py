@@ -121,10 +121,11 @@ class Cluster(object):
 
 class RPCluster(object):
 
-    def __init__(self, fname=None):
+    def __init__(self, fname=None, notDMS=False):
         
         if fname is not None:
             self.readReactivities(fname)
+            self.isDMS = not notDMS
     
     
     def readReactivities(self, fname):
@@ -189,7 +190,7 @@ class RPCluster(object):
     def renormalize(self):
 
         for i in range(len(self.profiles)):
-            self.profiles[i].normalize(DMS=True)
+            self.profiles[i].normalize(DMS=self.isDMS)
 
 
 

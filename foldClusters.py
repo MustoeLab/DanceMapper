@@ -64,6 +64,7 @@ def parseArgs():
     prs.add_argument('--pk', action='store_true', help='fold using ShapeKnots (default is to use Fold)')
     prs.add_argument('--nog', action='store_true', help='mask Gs (set to no-data)')
     prs.add_argument('--nou', action='store_true', help='mask Us (set to no-data)')
+    prs.add_argument('--notDMS', action='store_true', default=False, help='Turn off any assumptions that DMS was used (default=False)')
 
     return prs.parse_args()
 
@@ -92,7 +93,7 @@ if __name__=='__main__':
             exit('Path to RNAstructure:ProbabilityPlot is invalid! Check directory path in externalpaths!')
 
 
-    clusters = RPCluster(args.inputReactivity)   
+    clusters = RPCluster(args.inputReactivity, args.notDMS)   
 
     seqfile, dmsfiles = writeFiles(clusters, args.output, nog=args.nog, nou=args.nou)
 
@@ -100,7 +101,8 @@ if __name__=='__main__':
     for i,dfile in enumerate(dmsfiles):
             
         if args.prob:
-            command = [pfunpath, seqfile, dfile[:-4]+'.pfs', '--dmsnt', dfile]
+            command = [pfunpath, seqfile, dfile[:-4]+'.pfs',
+                       ['--dmsnt', '--SHAPE'][notDMS], dfile]
             if args.bp:
                 command.extend(('-x', args.bp+'-{}-pairmap.bp'.format(i)))
             print(command)
@@ -112,7 +114,8 @@ if __name__=='__main__':
             
 
         elif not args.pk:
-            command = [foldpath, seqfile, dfile[:-4]+'.ct', '--dmsnt', dfile]
+            command = [foldpath, seqfile, dfile[:-4]+'.ct',
+                       ['--dmsnt', '--SHAPE'][notDMS], dfile]
 
             if args.bp:
                 command.extend(('-x', args.bp+'-{}-pairmap.bp'.format(i)))
@@ -120,11 +123,13 @@ if __name__=='__main__':
             subprocess.call(command)
 
         else:
+            foldPKargs = {'ShapeKnotsPath':skpath,
+                          'seqfile':seqfile,
+                          'outprefix':dfile[:-4],
+                          ['dmsfile', 'shapefile'][notDMS]: dfile}
             if args.bp:
-                foldPK.iterativeShapeKnots(skpath, seqfile, dfile[:-4], dmsfile=dfile, 
-                                           bpfile=args.bp+'-{}-pairmap.bp'.format(i))
-            else:
-                foldPK.iterativeShapeKnots(skpath, seqfile, dfile[:-4], dmsfile=dfile)
+                foldPKargs['bpfile'] = args.bp+'-{}-pairmap.bp'.format(i))
+            foldPK.iterativeShapeKnots(**foldPKargs)
 
 
         aplot = ArcPlot(title = '{} P={:.3f}'.format(args.output, clusters.population[i]), fasta=seqfile)
@@ -136,8 +141,10 @@ if __name__=='__main__':
         else:
             aplot.addCT( RNAtools.CT(dfile[:-4]+'.ct') )
 
-
-        aplot.readDMSProfile(dfile)
+        if notDMS:
+            aplot.readProfile(dfile)
+        else:
+            aplot.readDMSProfile(dfile)
 
         if args.bp:
             aplot.addPairMap( PairMap(args.bp+'-{}-pairmap.txt'.format(i)), panel=-1)

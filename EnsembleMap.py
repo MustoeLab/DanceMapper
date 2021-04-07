@@ -21,7 +21,7 @@ from pairmapper import PairMapper
 
 class EnsembleMap(object):
 
-    def __init__(self, modfile=None, untfile=None, profilefile=None, seqlen=None, **kwargs):
+    def __init__(self, modfile=None, untfile=None, profilefile=None, seqlen=None, notDMS=False, **kwargs):
         """Define important global parameters"""
     
         # reads contains positions that are 'read'
@@ -31,6 +31,7 @@ class EnsembleMap(object):
         
         # Affiliated ReactivityProfile object
         self.profile=None
+        self.isDMS = not notDMS
     
         # np.array of sequence positions to actively cluster 
         self.active_columns=None
@@ -83,7 +84,7 @@ class EnsembleMap(object):
     def init_profile(self, profilefile):
 
         self.profile = ReactivityProfile(profilefile)
-        self.profile.normalize(DMS=True)
+        self.profile.normalize(DMS=self.isDMS)
         self.sequence = ''.join(self.profile.sequence)
         self.seqlen = len(self.sequence)
         self.ntindices = self.profile.nts
@@ -808,7 +809,7 @@ class EnsembleMap(object):
         maxProfile = self.profile.copy()
         maxProfile.rawprofile = np.max(model.mu, axis=0)
         maxProfile.backgroundSubtract()
-        normfactors = maxProfile.normalize(DMS=True)
+        normfactors = maxProfile.normalize(DMS=self.isDMS)
 
 
         # now create new normalized profiles
@@ -1187,7 +1188,7 @@ def parseArguments():
     optional.add_argument('--readfromfile', type=str, help='Read in solved BM model from BM file')
     optional.add_argument('--suppressverbal', action='store_false', help='Suppress verbal output')
     optional.add_argument('--outputprefix', type=str, default='emfit', help='Write output files with this prefix (default=emfit)')
-    
+    optional.add_argument('--notDMS', action='store_true', default=False, help='Turn off any assumption that DMS was used (default=False)')
 
     parser._action_groups.append(optional)
 
@@ -1252,7 +1253,8 @@ if __name__=='__main__':
                      maskU = args.maskU,
                      minreadcoverage=args.mincoverage, 
                      undersample=args.undersample,
-                     verbal=args.suppressverbal)
+                     verbal=args.suppressverbal,
+                     notDMS=args.notDMS)
        
     if args.fit:
         
