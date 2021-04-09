@@ -1,8 +1,8 @@
-
-ringmapperpath = '/Users/anthonymustoe/Dropbox/Code/RingMapper'
-arcplotpath = '/Users/anthonymustoe/Dropbox/Code/arcPlot/'
-rnatoolspath = '/Users/anthonymustoe/Dropbox/Code/RNATools/'
-rnastructurepath = '/Users/anthonymustoe/Code/RNAstructure/exe/'
+home='/nas/longleaf/home/psirving/'
+ringmapperpath = home+'RingMapper'
+arcplotpath = home+'arcPlot/'
+rnatoolspath = home+'RNATools/'
+rnastructurepath = home+'RNAstructure/exe/'
 
 
 

@@ -102,7 +102,7 @@ if __name__=='__main__':
             
         if args.prob:
             command = [pfunpath, seqfile, dfile[:-4]+'.pfs',
-                       ['--dmsnt', '--SHAPE'][notDMS], dfile]
+                       ['--dmsnt', '--SHAPE'][args.notDMS], dfile]
             if args.bp:
                 command.extend(('-x', args.bp+'-{}-pairmap.bp'.format(i)))
             print(command)
@@ -115,7 +115,7 @@ if __name__=='__main__':
 
         elif not args.pk:
             command = [foldpath, seqfile, dfile[:-4]+'.ct',
-                       ['--dmsnt', '--SHAPE'][notDMS], dfile]
+                       ['--dmsnt', '--SHAPE'][args.notDMS], dfile]
 
             if args.bp:
                 command.extend(('-x', args.bp+'-{}-pairmap.bp'.format(i)))
@@ -126,9 +126,9 @@ if __name__=='__main__':
             foldPKargs = {'ShapeKnotsPath':skpath,
                           'seqfile':seqfile,
                           'outprefix':dfile[:-4],
-                          ['dmsfile', 'shapefile'][notDMS]: dfile}
+                          ['dmsfile', 'shapefile'][args.notDMS]: dfile}
             if args.bp:
-                foldPKargs['bpfile'] = args.bp+'-{}-pairmap.bp'.format(i))
+                foldPKargs['bpfile'] = args.bp+'-{}-pairmap.bp'.format(i)
             foldPK.iterativeShapeKnots(**foldPKargs)
 
 
@@ -141,7 +141,7 @@ if __name__=='__main__':
         else:
             aplot.addCT( RNAtools.CT(dfile[:-4]+'.ct') )
 
-        if notDMS:
+        if args.notDMS:
             aplot.readProfile(dfile)
         else:
             aplot.readDMSProfile(dfile)
