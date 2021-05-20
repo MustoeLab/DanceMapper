@@ -400,6 +400,9 @@ def printPearson(clust1, clust2):
                 mask = (clust1.rawprofiles[i]>-1) & (clust2.rawprofiles[j]>-1)
      
             corrcoef = stats.pearsonr(clust1.rawprofiles[i][mask], clust2.rawprofiles[j][mask])
+            if isinstance(corrcoef, (list, tuple)):
+                corrcoef = corrcoef[0]
+
             print("{0} {1:.3f}, {2} {3:.3f} : {4:.2f}".format(i,pi,j,pj,corrcoef))
    
 
