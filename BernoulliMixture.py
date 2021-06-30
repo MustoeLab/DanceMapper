@@ -721,7 +721,7 @@ class BernoulliMixture(object):
 
 
 
-    def modelDifference(self, BM2, func=np.max, columns='active'):
+    def modelDifference(self, BM2, mufunc=np.max, pfunc=np.max, columns='active'):
         """compute the difference between two BM models. 
         The difference is evaluated using func
         columns can be active, inactive, both (both = active+inactive) 
@@ -750,9 +750,9 @@ class BernoulliMixture(object):
         idx = self.alignModel(BM2)
         
         d = np.abs(self.mu - BM2.mu[idx,])
-        mudiff = func(d[:, actlist])
+        mudiff = mufunc(d[:, actlist])
         
-        pdiff = func(np.abs(self.p-BM2.p[idx,]))
+        pdiff = pfunc(np.abs(self.p-BM2.p[idx,]))
         
 
         return pdiff, mudiff
@@ -1095,16 +1095,19 @@ class BernoulliMixture(object):
         return minval
 
 
-    def model_num_diff(self, diff_cutoff=0.01):
+    def model_num_diff(self, cols=None, diff_cutoff=0.01):
         """Return the minimum number of different mus between model components
         """
+        
+        if cols is None:
+            cols = self.active_columns
 
         minval = 1e5
         
         for i,j in itertools.combinations(range(self.pdim), 2):
             
             diff = np.abs(self.mu[i]-self.mu[j])
-            diff = diff[self.active_columns] > diff_cutoff
+            diff = diff[cols] > diff_cutoff
                 
             s = np.sum(diff)     
 
