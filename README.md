@@ -3,16 +3,13 @@ ML clustering code and associated analysis scripts for deconvoluting RNA ensembl
 from single-molecule DMS-MaP datasets
 
 -----------------------------------------
-Copywrite 2020 Anthony Mustoe
+Copywrite 2021 Anthony Mustoe
 
 This project is licensed under the terms of the MIT license
 
-Developed jointly by:
-Anthony Mustoe Lab
-Baylor College of Medicine
-
-Kevin Weeks Lab
-University of North Carolina
+Developed by:
+Anthony Mustoe Lab, Baylor College of Medicine
+Kevin Weeks Lab, University of North Carolina
 
 Contact: anthony.mustoe@bcm.edu
 
@@ -104,9 +101,6 @@ Output:
 
 
 
-
-Structure modeling
--------------------
 ### foldClusters.py
 Script for performing RNAstructure modeling based on clustered reactivities and plotting results 
 using arcPlot. Takes -reactivities.txt file as input. Can also accept -pairmap.bp restraints. 
@@ -131,8 +125,6 @@ Run foldClusters.py --help for additional options and usage information
 
 
 
-Accessory analysis scripts
---------------------------
 ### plotClusters.py 
 Script for visualizing and comparing reactivities of DanceMaP identified clusters.
 (Makes step plots, also known as skyline plots).
