@@ -8,16 +8,13 @@ Copywrite 2021 Anthony Mustoe
 This project is licensed under the terms of the MIT license
 
 Developed by:
+
 Anthony Mustoe Lab, Baylor College of Medicine
+
 Kevin Weeks Lab, University of North Carolina
 
 Contact: anthony.mustoe@bcm.edu
 
-
-
-General Description
-------------
-Forthcoming
 
 
 Dependencies
@@ -56,9 +53,8 @@ ShapeMapper2 should be run with the *--output-parsed-mutations* option.
 ShapeMapper2 can be obtained at https://github.com/Weeks-UNC/shapemapper2
 
 
-DANCE-MaP
----------------------------
-### DanceMapper.py
+DanceMapper.py
+--------------
 Run DanceMapper.py --help for complete usage information
 
 Note that we recommend having at least 250,000 mapped reads for reliable DANCE deconvolution, and ideally
@@ -75,12 +71,15 @@ PAIR or RING analysis (*--pairmap* or *--ring*) anticipate 12-48 hours each.
 
 Input:
     
-    parsed.mut file output by ShapeMapper
+    parsed.mut 
+        file output by ShapeMapper
     
-    profile.txt file output by ShapeMapper
+    profile.txt 
+        file output by ShapeMapper
     
 
 Output:
+
     .bm file 
         save file of the Bernoulli mixture model. Only generated when using the --fit option
 
@@ -101,7 +100,8 @@ Output:
 
 
 
-### foldClusters.py
+foldClusters.py
+----------------
 Script for performing RNAstructure modeling based on clustered reactivities and plotting results 
 using arcPlot. Takes -reactivities.txt file as input. Can also accept -pairmap.bp restraints. 
 
@@ -125,7 +125,8 @@ Run foldClusters.py --help for additional options and usage information
 
 
 
-### plotClusters.py 
+plotClusters.py
+----------------
 Script for visualizing and comparing reactivities of DanceMaP identified clusters.
 (Makes step plots, also known as skyline plots).
 Run plotClusters.py --help for usage information
@@ -134,7 +135,7 @@ Run plotClusters.py --help for usage information
 
 
 Example
-------------
+========
 
 *Preprocess data*
 
@@ -144,7 +145,7 @@ Example
 
 *Run DanceMapper with PAIR and RING analysis*
 
-    DanceMapper.py --mod example_Modified_add_parsed.mut --unt example_Untreated_add_parsed.mut --prof example_addl_profile.txt --out example --fit --pair --ring
+    DanceMapper.py --mod example_Modified_add_parsed.mut --unt example_Untreated_add_parsed.mut --prof example_add_profile.txt --out example --fit --pair --ring
 
 
 *Fold and plot structure states (using PAIR restraints and computing pairing probabilities)*
