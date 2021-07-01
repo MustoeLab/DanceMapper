@@ -19,7 +19,7 @@ from pairmapper import PairMapper
 
 
 
-class EnsembleMap(object):
+class DanceMap(object):
 
     def __init__(self, modfile=None, untfile=None, profilefile=None, seqlen=None, **kwargs):
         """Define important global parameters"""
@@ -883,8 +883,8 @@ class EnsembleMap(object):
                np.array_equal(self.inactive_columns, self.BMsolution.inactive_columns):
 
             if verbal:
-                sys.stderr.write('active_columns in BMsolution and EnsembleMap object are different!\n')
-                sys.stderr.write('Updating EnsembleMap columns to BMsolution values\n')
+                sys.stderr.write('active_columns in BMsolution and DanceMap object are different!\n')
+                sys.stderr.write('Updating DanceMap columns to BMsolution values\n')
             
             self.setColumns(activecols=self.BMsolution.active_columns, 
                             inactivecols=self.BMsolution.inactive_columns)    
@@ -1247,14 +1247,14 @@ if __name__=='__main__':
     
     # Log file messaging for keeping track of run info
     print(' '.join(sys.argv[:]))
-    print('\nStarting up Ensemble-MaP')
+    print('\nStarting up DANCE-MaPper pipeline')
     print('{:%Y-%m-%d %H:%M:%S}'.format(datetime.datetime.now()))
 
     args = parseArguments()
     print('Arguments = {}\n\n'.format(args))
 
 
-    EM = EnsembleMap(modfile=args.modified_parsed, untfile=args.untreated_parsed,
+    DM = DanceMap(modfile=args.modified_parsed, untfile=args.untreated_parsed,
                      profilefile=args.profile, 
                      minrxbg = args.minrxbg,
                      maskG = args.maskG,
@@ -1265,28 +1265,28 @@ if __name__=='__main__':
        
     if args.fit:
         
-        EM.findBestModel(args.maxcomponents, trials=args.trials,
+        DM.findBestModel(args.maxcomponents, trials=args.trials,
                          badcolcount = args.badcol_cutoff,
                          priorWeight = args.priorWeight,
                          verbal=args.suppressverbal,
                          writeintermediate = args.writeintermediates)
 
-        EM.writeReactivities(args.outputprefix+'-reactivities.txt')
-        EM.BMsolution.writeModel(args.outputprefix+'.bm')
+        DM.writeReactivities(args.outputprefix+'-reactivities.txt')
+        DM.BMsolution.writeModel(args.outputprefix+'.bm')
 
 
 
     elif args.forcefit:
 
-        bestBM = EM.fitEM(args.forcefit, trials=200, 
+        bestBM = DM.fitEM(args.forcefit, trials=200, 
                           badcolcount = args.badcol_cutoff,
                           priorWeight = args.priorWeight,
                           verbal = args.suppressverbal, 
                           writeintermediate = args.writeintermediates,
                           forcefit = True)
 
-        EM.writeReactivities(args.outputprefix+'-reactivities.txt')
-        EM.BMsolution.writeModel(args.outputprefix+'.bm')
+        DM.writeReactivities(args.outputprefix+'-reactivities.txt')
+        DM.BMsolution.writeModel(args.outputprefix+'.bm')
 
     
 
@@ -1294,7 +1294,7 @@ if __name__=='__main__':
 
     elif args.readfromfile is not None:
 
-        EM.readModelFromFile(args.readfromfile)
+        DM.readModelFromFile(args.readfromfile)
 
 
     if args.ring:
@@ -1303,7 +1303,7 @@ if __name__=='__main__':
                 print('--------------Computing RINGs--------------')
 
 
-        RE_list = EM.computeRINGs(window=args.window, bgfile=args.untreated_parsed, subtractwindow=args.inclwindow,
+        RE_list = DM.computeRINGs(window=args.window, bgfile=args.untreated_parsed, subtractwindow=args.inclwindow,
                                   assignprob=args.readprob_cut, verbal=args.suppressverbal)
 
         for i,model in enumerate(RE_list):
@@ -1314,13 +1314,13 @@ if __name__=='__main__':
 
     if args.pairmap:
         
-        profiles = EM.computeNormalizedReactivities()
+        profiles = DM.computeNormalizedReactivities()
         
         if args.suppressverbal:
                 print('--------------Computing PAIRs--------------')
 
 
-        RE_list = EM.computeRINGs(window=3, bgfile=args.untreated_parsed, subtractwindow=args.inclwindow,
+        RE_list = DM.computeRINGs(window=3, bgfile=args.untreated_parsed, subtractwindow=args.inclwindow,
                                   assignprob=args.readprob_cut, verbal=args.suppressverbal)
 
         for i,model in enumerate(RE_list):
