@@ -533,7 +533,7 @@ class DanceMap(object):
                 bestfitBIC = self.compareBIC(BM, bestfit, verbal=verbal)
                 
                 # compute the difference betwene models
-                pdiff, mudiff = BM.modelDifference(bestfit, func=np.max)
+                pdiff, mudiff = BM.modelDifference(bestfit)
                 
                 # if models are this close, then we have found the same soln
                 if pdiff < 0.03 and mudiff < 0.01:
@@ -727,7 +727,7 @@ class DanceMap(object):
         
         for i,f in enumerate(fitlist):
 
-            pdiff, mudiff = bestfit.modelDifference(f, func=np.max)
+            pdiff, mudiff = bestfit.modelDifference(f)
             
             bmcode = ''
             if f is bestfit:

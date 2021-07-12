@@ -5,7 +5,7 @@ import itertools, sys
 import externalpaths
 sys.path.append(externalpaths.ringmapper())
 
-from DanceMap import DanceMap
+from DanceMapper import DanceMap
 from BernoulliMixture import BernoulliMixture
 from ReactivityProfile import ReactivityProfile
 

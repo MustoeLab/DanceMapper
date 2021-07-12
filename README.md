@@ -145,12 +145,12 @@ Example
 
 *Run DanceMapper with PAIR and RING analysis*
 
-    DanceMapper.py --mod example_Modified_add_parsed.mut --unt example_Untreated_add_parsed.mut --prof example_add_profile.txt --out example --fit --pair --ring
+    python DanceMapper.py --mod example_Modified_add_parsed.mut --unt example_Untreated_add_parsed.mut --prof example_add_profile.txt --out example --fit --pair --ring
 
 
 *Fold and plot structure states (using PAIR restraints and computing pairing probabilities)*
     
-    foldClusters.py --bp example --prob example-reactivities.txt example
+    python foldClusters.py --bp example --prob example-reactivities.txt example
 
 
 
