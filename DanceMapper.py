@@ -19,7 +19,7 @@ from pairmapper import PairMapper
 
 
 
-class EnsembleMap(object):
+class DanceMap(object):
 
     def __init__(self, modfile=None, untfile=None, profilefile=None, seqlen=None, notDMS=False, **kwargs):
         """Define important global parameters"""
@@ -534,7 +534,7 @@ class EnsembleMap(object):
                 bestfitBIC = self.compareBIC(BM, bestfit, verbal=verbal)
                 
                 # compute the difference betwene models
-                pdiff, mudiff = BM.modelDifference(bestfit, func=np.max)
+                pdiff, mudiff = BM.modelDifference(bestfit)
                 
                 # if models are this close, then we have found the same soln
                 if pdiff < 0.03 and mudiff < 0.01:
@@ -619,7 +619,7 @@ class EnsembleMap(object):
             return BMold.BIC
         
         elif not np.all(np.isin(BMnew.active_columns, BMold.active_columns)):
-            raise ValueError('BMnew active_columns are not a ubset of BMold active_columns')
+            raise ValueError('BMnew active_columns are not a subset of BMold active_columns')
 
         # if we get here then we need to refit
         if verbal:  
@@ -728,7 +728,7 @@ class EnsembleMap(object):
         
         for i,f in enumerate(fitlist):
 
-            pdiff, mudiff = bestfit.modelDifference(f, func=np.max)
+            pdiff, mudiff = bestfit.modelDifference(f)
             
             bmcode = ''
             if f is bestfit:
@@ -751,7 +751,6 @@ class EnsembleMap(object):
             return
         
         rms = bm.model_rms_diff()
-        absmean = bm.model_absmean_diff()
         ndiff = bm.model_num_diff()
         p_err = max(bm.p_err)
        
@@ -766,18 +765,11 @@ class EnsembleMap(object):
             print('Min Mu RMS Diff = {0:.3f}    FAILED'.format(rms))
             count += 1
 
-        if absmean > 0.01:
-            print('Min Mu Mean Diff = {0:.3f}   PASSED'.format(absmean))
-        else:
-            print('Min Mu Mean Diff = {0:.3f}   FAILED'.format(absmean))
-            count += 1
-
         if ndiff > 20:
             print('Min # Diff Mu = {}         PASSED'.format(ndiff))
         else:
             print('Min # Diff Mu = {}         FAILED'.format(ndiff))
             count += 1
-
 
         if p_err < 0.01:
             print('Max P error = {0:.3f}        PASSED'.format(p_err))
@@ -880,7 +872,7 @@ class EnsembleMap(object):
             
 
 
-    def readModelFromFile(self, fname):
+    def readModelFromFile(self, fname, verbal=True):
         """Read in BMsolution from BM file object"""
         
 
@@ -890,8 +882,10 @@ class EnsembleMap(object):
         # check to make sure the active, inactive are the same
         if not np.array_equal(self.active_columns, self.BMsolution.active_columns) or \
                np.array_equal(self.inactive_columns, self.BMsolution.inactive_columns):
-            sys.stderr.write('active_columns in BMsolution and EnsembleMap object are different!\n')
-            sys.stderr.write('Updating EnsembleMap columns to BMsolution values\n')
+
+            if verbal:
+                sys.stderr.write('active_columns in BMsolution and DanceMap object are different!\n')
+                sys.stderr.write('Updating DanceMap columns to BMsolution values\n')
             
             self.setColumns(activecols=self.BMsolution.active_columns, 
                             inactivecols=self.BMsolution.inactive_columns)    
@@ -975,7 +969,7 @@ class EnsembleMap(object):
  
 
     def _null_RINGs(self, window=1, corrtype='g', assignprob=0.9, 
-                    subtractwindow=True, montecarlo=False, verbal=True):
+                    subtractwindow=True, montecarlo=False, verbal=False):
         """Create null (uncorrelated) model and assign reads based on posterior prob 
         to determine null-model correlations. 
         Returns list of RINGexperiment objs
@@ -999,8 +993,7 @@ class EnsembleMap(object):
         nullEM = null_model.getEMobject(self.reads.shape[0], nodata_rate=0.1, 
                                         invalidcols=self.invalid_columns,
                                         verbal=False)
- 
-
+        
         # setup the activestatus mask. Assign reads using both active & inactive cols
         activestatus = np.zeros(self.seqlen, dtype=np.int8)
         activestatus[self.active_columns] = 1
@@ -1029,7 +1022,7 @@ class EnsembleMap(object):
         # populate RINGexperiment objects
         for p in xrange(self.BMsolution.pdim):
 
-            ring = RINGexperiment(arraysize=self.seqlen, corrtype=corrtype, verbal=False)
+            ring = RINGexperiment(arraysize=self.seqlen, corrtype=corrtype, verbal=verbal)
 
             ring.sequence = self.sequence
 
@@ -1038,7 +1031,7 @@ class EnsembleMap(object):
             ring.ex_comutarr = comut[p]
             ring.ex_inotjarr = inotj[p]
             
-            ring.computeCorrelationMatrix(mincount=10, ignorents=self.invalid_columns)
+            ring.computeCorrelationMatrix(mincount=10, ignorents=self.invalid_columns, verbal=verbal)
             #ring.writeDataMatrices('ex', 'null-{}.txt'.format(p))
             relist.append(ring)
             
@@ -1071,10 +1064,28 @@ class EnsembleMap(object):
 
         # compute correlations from null model (clustering only w/o correlations)
         null = self._null_RINGs(window=window, assignprob=assignprob, 
-                                subtractwindow=subtractwindow, montecarlo=montecarlo, verbal=verbal) 
+                                subtractwindow=subtractwindow, montecarlo=montecarlo) 
 
 
-        # iterate through each model and mask out corrs present in the null model
+
+        # mask out corrs present in the null model
+        for p in range(self.BMsolution.pdim):
+            
+            # p=0.001 for df=1
+            for (i,j) in null[p].significantCorrelations('ex', 10.83):
+                
+                if verbal:
+                    print('Pair ({},{}) ignored due to chi2={:.1f} correlation in null model={}'.format(i+1,j+1, null[p].ex_correlations[i,j], p))
+                
+                for k in range(self.BMsolution.pdim):
+                    sample[k].ex_correlations[i,j] = np.ma.masked
+                    sample[k].ex_correlations[j,i] = np.ma.masked
+                    sample[k].ex_zscores[i,j] = np.ma.masked
+                    sample[k].ex_zscores[j,i] = np.ma.masked
+            
+
+
+        # now test for significant difference in distributiosn
         for p in range(self.BMsolution.pdim):
             
             sample_p = sample[p]
@@ -1082,23 +1093,21 @@ class EnsembleMap(object):
             
             for i,j in itertools.combinations(range(self.seqlen), 2):
 
-                nullcorr = null_p.ex_correlations[i,j]
                 nulldiff = sample_p.significantDifference(i,j, null_p.ex_readarr[i,j], null_p.ex_inotjarr[i,j],
                                                           null_p.ex_inotjarr[j,i], null_p.ex_comutarr[i,j])
                 
-                
-                # p=0.001 for df=1 and df=3, respectively
-                if nullcorr>10.83 or nulldiff < 16.27:
+                # p=0.001 for df=3
+                if nulldiff < 16.27:
 
                     if verbal and sample_p.ex_correlations[i,j]>23.93:
-                        outstr='Model {}: Correlated pair ({},{}) w/ chi2={:.1f} ignored: NULL correlation chi2={:.1f} ; NULL difference chi2={:.1f}'.format(p,i+1,j+1, sample_p.ex_correlations[i,j], nullcorr, nulldiff)
-                        print(outstr)
+                        print('Model {}: Correlated pair ({},{}) w/ chi2={:.1f} ignored: NULL difference chi2={:.1f}'.format(p,i+1,j+1, sample_p.ex_correlations[i,j], nulldiff))
                 
                     sample_p.ex_correlations[i,j] = np.ma.masked
                     sample_p.ex_correlations[j,i] = np.ma.masked
                     sample_p.ex_zscores[i,j] = np.ma.masked
                     sample_p.ex_zscores[j,i] = np.ma.masked
             
+
         return sample
                                      
 
@@ -1239,14 +1248,14 @@ if __name__=='__main__':
     
     # Log file messaging for keeping track of run info
     print(' '.join(sys.argv[:]))
-    print('\nStarting up Ensemble-MaP')
+    print('\nStarting up DANCE-MaPper pipeline')
     print('{:%Y-%m-%d %H:%M:%S}'.format(datetime.datetime.now()))
 
     args = parseArguments()
     print('Arguments = {}\n\n'.format(args))
 
 
-    EM = EnsembleMap(modfile=args.modified_parsed, untfile=args.untreated_parsed,
+    DM = DanceMap(modfile=args.modified_parsed, untfile=args.untreated_parsed,
                      profilefile=args.profile, 
                      minrxbg = args.minrxbg,
                      maskG = args.maskG,
@@ -1258,28 +1267,28 @@ if __name__=='__main__':
        
     if args.fit:
         
-        EM.findBestModel(args.maxcomponents, trials=args.trials,
+        DM.findBestModel(args.maxcomponents, trials=args.trials,
                          badcolcount = args.badcol_cutoff,
                          priorWeight = args.priorWeight,
                          verbal=args.suppressverbal,
                          writeintermediate = args.writeintermediates)
 
-        EM.writeReactivities(args.outputprefix+'-reactivities.txt')
-        EM.BMsolution.writeModel(args.outputprefix+'.bm')
+        DM.writeReactivities(args.outputprefix+'-reactivities.txt')
+        DM.BMsolution.writeModel(args.outputprefix+'.bm')
 
 
 
     elif args.forcefit:
 
-        bestBM = EM.fitEM(args.forcefit, trials=200, 
+        bestBM = DM.fitEM(args.forcefit, trials=200, 
                           badcolcount = args.badcol_cutoff,
                           priorWeight = args.priorWeight,
                           verbal = args.suppressverbal, 
                           writeintermediate = args.writeintermediates,
                           forcefit = True)
 
-        EM.writeReactivities(args.outputprefix+'-reactivities.txt')
-        EM.BMsolution.writeModel(args.outputprefix+'.bm')
+        DM.writeReactivities(args.outputprefix+'-reactivities.txt')
+        DM.BMsolution.writeModel(args.outputprefix+'.bm')
 
     
 
@@ -1287,12 +1296,16 @@ if __name__=='__main__':
 
     elif args.readfromfile is not None:
 
-        EM.readModelFromFile(args.readfromfile)
+        DM.readModelFromFile(args.readfromfile)
 
 
     if args.ring:
+        
+        if args.suppressverbal:
+                print('--------------Computing RINGs--------------')
 
-        RE_list = EM.computeRINGs(window=args.window, bgfile=args.untreated_parsed, subtractwindow=args.inclwindow,
+
+        RE_list = DM.computeRINGs(window=args.window, bgfile=args.untreated_parsed, subtractwindow=args.inclwindow,
                                   assignprob=args.readprob_cut, verbal=args.suppressverbal)
 
         for i,model in enumerate(RE_list):
@@ -1303,15 +1316,19 @@ if __name__=='__main__':
 
     if args.pairmap:
         
-        profiles = EM.computeNormalizedReactivities()
+        profiles = DM.computeNormalizedReactivities()
+        
+        if args.suppressverbal:
+                print('--------------Computing PAIRs--------------')
 
-        RE_list = EM.computeRINGs(window=3, bgfile=args.untreated_parsed, subtractwindow=args.inclwindow,
+
+        RE_list = DM.computeRINGs(window=3, bgfile=args.untreated_parsed, subtractwindow=args.inclwindow,
                                   assignprob=args.readprob_cut, verbal=args.suppressverbal)
 
         for i,model in enumerate(RE_list):
             
             if args.suppressverbal:
-                print('--------------Computing PAIRs : Model {}--------------'.format(i))
+                print('*******Model {}*******'.format(i))
 
 
             model.writeCorrelations('{0}-{1}-allcorrs.txt'.format(args.outputprefix,i), 

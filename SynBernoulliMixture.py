@@ -5,7 +5,7 @@ import itertools, sys
 import externalpaths
 sys.path.append(externalpaths.ringmapper())
 
-from EnsembleMap import EnsembleMap
+from DanceMapper import DanceMap
 from BernoulliMixture import BernoulliMixture
 from ReactivityProfile import ReactivityProfile
 
@@ -247,7 +247,7 @@ class SynBernoulliMixture():
 
     def constructEM(self, reads, muts, **kwargs):
 
-        EM = EnsembleMap(seqlen=self.mu.shape[1])     
+        EM = DanceMap(seqlen=self.mu.shape[1])     
         
         EM.numreads = reads.shape[0]
 
