@@ -916,6 +916,7 @@ class DanceMap(object):
             if verbal:
                 print('Using MC for sample RING read assignment')
             
+            raise AttributeError('Monte Carlo option has been removed')
             read, comut, inotj = aFunc.fillRINGMatrix_montecarlo(self.reads, self.mutations, activestatus,
                                                                  self.BMsolution.mu, self.BMsolution.p, 
                                                                  window, self.reads.shape[0], subtractwindow)
@@ -1003,7 +1004,8 @@ class DanceMap(object):
         if montecarlo:
             if verbal:
                 print('Using MC for null RING read assignment')
-
+            
+            raise AttributeError('Monte Carlo option has been removed')
             read, comut, inotj = aFunc.fillRINGMatrix_montecarlo(nullEM.reads, nullEM.mutations, activestatus,
                                                                  mu, self.BMsolution.p, 
                                                                  window, self.reads.shape[0], subtractwindow)

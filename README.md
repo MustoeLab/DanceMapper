@@ -154,10 +154,4 @@ Example
 
 
 
-Complete class description 
---------------------------
-Forthcoming
-
-
-
 
