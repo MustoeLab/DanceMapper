@@ -20,9 +20,8 @@ import sys
 sys.path.append(externalpaths.ringmapper())
 
 ext = Extension('accessoryFunctions', 
-                sources=['accessoryFunctions.pyx', 'dSFMT/dSFMT.c'],
-                include_dirs = [numpy.get_include(), externalpaths.ringmapper(), 'dSFMT/'],
-                extra_compile_args=["-DDSFMT_MEXP=19937"]) # arg for dSFMT
+                sources=['accessoryFunctions.pyx'],
+                include_dirs = [numpy.get_include(), externalpaths.ringmapper()])
 
 setup(
     name = "accessoryFunctions",
