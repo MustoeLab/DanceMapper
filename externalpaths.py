@@ -1,8 +1,11 @@
 
-ringmapperpath = '/Users/anthonymustoe/Dropbox/Code/RingMapper'
-arcplotpath = '/Users/anthonymustoe/Dropbox/Code/arcPlot/'
-rnatoolspath = '/Users/anthonymustoe/Dropbox/Code/RNATools/'
-rnastructurepath = '/Users/anthonymustoe/Code/RNAstructure/exe/'
+# insert absolute paths to dependencies below.
+# Only ringmapperpath needs to be defined for DanceMapper
+
+ringmapperpath = '' # example: '/Users/xxxxxx/Code/RingMapper'
+arcplotpath = '' # example: '/Users/xxxxxx/Code/arcPlot/'
+rnatoolspath = '' # example: '/Users/xxxxxxx/Code/RNATools/'
+rnastructurepath = '' # example: '/Users/xxxxxxxx/Code/RNAstructure/exe/'
 
 
 
