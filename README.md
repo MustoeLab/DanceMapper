@@ -65,8 +65,12 @@ For PAIR and RING analysis of deconvoluted reads, we recommend having at least 1
 >1,000,000 reads per state.
 
 The current script is serial (single cpu). Run times vary based RNA size, number of reads, and number
-of final clusters. When performing primary clustering (*--fit*), anticipate 4-24 hours. When running
+of final clusters. When performing primary clustering (*--fit*), anticipate between 1-24 hours. When running
 PAIR or RING analysis (*--pairmap* or *--ring*) anticipate 12-48 hours each. 
+
+Note that DanceMapper is very memory intensive. As a rough guideline, you will need 50 x N x R bytes, where
+N is the RNA length and R is the # of reads. So for a 400 nt long RNA with 1M reads, this would be 20 GB. 
+We plan to release a memory calculator tool with future releases.
 
 
 Input:
@@ -122,6 +126,9 @@ the MFE structure, the DMS reactivity profile, and PAIR data (if the --bp flag i
 
 Run foldClusters.py --help for additional options and usage information
 
+Note that the pairing probability option is currently not supported in standard distributions of RNAstructure.
+We are working on making this option available. Please contact us for more information in the meantime.
+
 
 
 
@@ -129,13 +136,19 @@ plotClusters.py
 ----------------
 Script for visualizing and comparing reactivities of DanceMaP identified clusters.
 (Makes step plots, also known as skyline plots).
-Run plotClusters.py --help for usage information
 
+Run plotClusters.py --help for usage information
 
 
 
 Example
 ========
+
+Some example data and commands are provided in the *example* directory. 
+
+
+Some generic example commands are below:
+
 
 *Preprocess data*
 
@@ -148,9 +161,10 @@ Example
     python DanceMapper.py --mod example_Modified_add_parsed.mut --unt example_Untreated_add_parsed.mut --prof example_add_profile.txt --out example --fit --pair --ring
 
 
-*Fold and plot structure states (using PAIR restraints and computing pairing probabilities)*
+*Fold each ensemble state (MFE) using PAIR restraints and get arcPlot visualization, including of PAIRs*
     
-    python foldClusters.py --bp example --prob example-reactivities.txt example
+    python foldClusters.py --bp example example-reactivities.txt example
+
 
 
 
