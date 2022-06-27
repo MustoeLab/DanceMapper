@@ -132,7 +132,7 @@ class DanceMap(object):
     def checkDataIntegrity(self):
         """Check the reads and mutations conform to expected format"""
         
-        for n in xrange(self.numreads):
+        for n in range(self.numreads):
             mask = np.array(self.mutations[n,:], dtype=bool)
             if np.sum(self.reads[n,mask]) != np.sum(mask):
                 raise ValueError('Data integrity failure! Read and mutation arrays do not agree at read {}'.format(n))
@@ -664,7 +664,7 @@ class DanceMap(object):
 
 
         # iterate through each model size
-        for c in xrange(2, maxcomponents+1):
+        for c in range(2, maxcomponents+1):
             
             if verbal: print('\nAdvancing to {}-component model\n'.format(c))
 
@@ -806,7 +806,7 @@ class DanceMap(object):
         # now create new normalized profiles
         profiles = []
 
-        for p in xrange(model.pdim):
+        for p in range(model.pdim):
             prof = self.profile.copy()
             prof.rawprofile = np.copy(model.mu[p,:])
             prof.backgroundSubtract()
@@ -850,7 +850,7 @@ class DanceMap(object):
             OUT.write('nReact\tRaw\t\t'*model.pdim+'Background\n')
             
             
-            for nt in xrange(model.mudim):
+            for nt in range(model.mudim):
                 
                 muline = '{0}\t{1}\t'.format(self.ntindices[nt], self.profile.sequence[nt])
                 
@@ -934,7 +934,7 @@ class DanceMap(object):
         relist = [] 
         
         # populate RINGexperiment objects
-        for p in xrange(self.BMsolution.pdim):
+        for p in range(self.BMsolution.pdim):
             
             ring = RINGexperiment(arraysize=self.seqlen, corrtype=corrtype, verbal=verbal)
 
@@ -1021,7 +1021,7 @@ class DanceMap(object):
         relist = []
 
         # populate RINGexperiment objects
-        for p in xrange(self.BMsolution.pdim):
+        for p in range(self.BMsolution.pdim):
 
             ring = RINGexperiment(arraysize=self.seqlen, corrtype=corrtype, verbal=verbal)
 

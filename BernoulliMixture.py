@@ -580,7 +580,7 @@ class BernoulliMixture(object):
                 
                 print('\tValid solution!')
                 msg = '\tP = ['
-                for i in xrange(self.pdim):
+                for i in range(self.pdim):
                     msg += ' {0:.3f} +/- {1:.3f},'.format(self.p[i], self.p_err[i])
                 print(msg[:-1]+' ]')
                 print('\tEM converged in {0} steps ({1:.0f} seconds); BIC={2:.1f}'.format(CM.step, time.time()-timestart, self.BIC))
@@ -778,7 +778,7 @@ class BernoulliMixture(object):
 
         OUT.write('\n\n# Nt Mu ; Mu_err\n')
         # write out Mu with active and inactive info
-        for i in xrange(self.mudim):
+        for i in range(self.mudim):
             
             if self.idxmap is not None:
                 OUT.write('{0} '.format(self.idxmap[i]))
@@ -814,7 +814,7 @@ class BernoulliMixture(object):
         
         # write out full initial mu without worrying about active/inactive
         OUT.write('\n\n# Initial Mu\n')
-        for i in xrange(self.mudim):
+        for i in range(self.mudim):
             if self.idxmap is not None:
                 OUT.write('{0} '.format(self.idxmap[i]))
             else:
@@ -897,8 +897,8 @@ class BernoulliMixture(object):
                 
 
                 try:
-                    vals = map(float, spl[1:1+self.pdim])
-                    errs = map(float, spl[2+self.pdim:2+2*self.pdim])
+                    vals = list(map(float, spl[1:1+self.pdim]))
+                    errs = list(map(float, spl[2+self.pdim:2+2*self.pdim]))
 
                     # invalid nt
                     if vals[0] != vals[0]:
@@ -958,7 +958,7 @@ class BernoulliMixture(object):
                 if len(spl)==0 or spl[0][0]=='#':
                     break
 
-                self.mu_initial[:, i] = map(float, spl[1:])
+                self.mu_initial[:, i] = list(map(float, spl[1:]))
             
 
             # clear empty space / header before priorA
@@ -968,7 +968,7 @@ class BernoulliMixture(object):
             
             priorA = []
             for i in range(self.pdim):
-                priorA.append(map(float, inp.readline().split()))
+                priorA.append(list(map(float, inp.readline().split())))
             self.priorA = np.array(priorA)
             
 
@@ -979,7 +979,7 @@ class BernoulliMixture(object):
             
             priorB = []
             for i in range(self.pdim):
-                priorB.append(map(float, inp.readline().split()))
+                priorB.append(list(map(float, inp.readline().split())))
             self.priorB = np.array(priorB)
             
 
@@ -1125,7 +1125,7 @@ class BernoulliMixture(object):
             return
 
         # sort model components by population
-        sortidx = range(self.pdim)
+        sortidx = list(range(self.pdim))
         sortidx.sort(key=lambda x: self.p[x], reverse=True)
 
         

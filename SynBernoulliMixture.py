@@ -102,7 +102,7 @@ class SynBernoulliMixture():
         Mu can be either array/list or file
         p is its population"""
 
-        if isinstance(mu, basestring):
+        if isinstance(mu, str):
             self.mu.append( self.readParFile(mu) )
         
         else:
@@ -165,7 +165,7 @@ class SynBernoulliMixture():
         # by default, things are not mutated (=0)
         muts = np.zeros((num_reads, seqlen), dtype=np.int8)
 
-        for m in xrange(num_models):
+        for m in range(num_models):
             
             # create mask of items to select
             mask = np.zeros(muts.shape, dtype=bool)
@@ -298,7 +298,7 @@ class SynBernoulliMixture():
 
     def writeParams(self, output):
         
-        sortidx = range(len(self.p))
+        sortidx = list(range(len(self.p)))
         sortidx.sort(key=lambda x: self.p[x], reverse=True)
 
 

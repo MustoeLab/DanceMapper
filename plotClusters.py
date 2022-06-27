@@ -61,7 +61,7 @@ class Cluster(object):
 
     def sortByPopulation(self):
 
-        idx = range(len(self.p))
+        idx = list(range(len(self.p)))
         idx.sort(key=lambda x: self.p[x], reverse=True)
         
         self.p = self.p[idx]
@@ -140,7 +140,7 @@ class RPCluster(object):
             raw = [[] for x in range(ncomp)]
             inactives = []
             
-            population = np.array(map(float,inp.readline().split()[1:]))
+            population = np.array(list(map(float,inp.readline().split()[1:])))
             inp.readline()
 
             for line in inp:
@@ -569,7 +569,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     if args.models:
-        args.models = map(int, args.models.split(','))
+        args.models = list(map(int, args.models.split(',')))
 
 
     if args.bm1 and not args.bm2:
