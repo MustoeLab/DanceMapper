@@ -3,7 +3,7 @@ ML clustering code and associated analysis scripts for deconvoluting RNA ensembl
 from single-molecule DMS-MaP datasets
 
 -----------------------------------------
-Copywrite 2021 Anthony Mustoe
+Copywrite 2022 Anthony Mustoe
 
 This project is licensed under the terms of the MIT license
 
@@ -26,11 +26,8 @@ Dependencies
 - Ringmapper/Pairmapper package (v1.1)
     available at https://github.com/Weeks-UNC/RingMapper
 
-- RNATools2 (needed for plotClusters and foldClusters)
-    available at https://github.com/Weeks-UNC/RNATools
-
-- arcPlot (needed for foldClusters)
-    available at https://github.com/Weeks-UNC/arcPlot
+- StructureAnalysisTools (needed for plotClusters and foldClusters)
+    available at https://github.com/MustoeLab/StructureAnalysisTools
     
 - RNAstructure (needed for foldClusters)
     available at https://rna.urmc.rochester.edu/RNAstructure.html
@@ -107,7 +104,7 @@ Output:
 foldClusters.py
 ----------------
 Script for performing RNAstructure modeling based on clustered reactivities and plotting results 
-using arcPlot. Takes -reactivities.txt file as input. Can also accept -pairmap.bp restraints. 
+using ArcPlot. Takes -reactivities.txt file as input. Can also accept -pairmap.bp restraints. 
 
 foldClusters.py will generate sequence ([out].seq) and normalized dms files ([out]-[i].dms) for
 performing RNAstructure modeling using the -dmsnt option. (Note that no math is being done, 
@@ -121,7 +118,7 @@ multiple PKs (see RNATools README for more information). Structure models are wr
 part of the hierarchical folding process. These are denoted as [out]-[i].1.ct, .2.ct, etc. 
 The final solution will be named [out]-[i].f.ct
 
-Finally, arcPlots are generated using arcPlot and saved as [out]-[i].pdf. PDFs show
+Finally, ArcPlots are generated using ArcPlot and saved as [out]-[i].pdf. PDFs show
 the MFE structure, the DMS reactivity profile, and PAIR data (if the --bp flag is used).
 
 Run foldClusters.py --help for additional options and usage information

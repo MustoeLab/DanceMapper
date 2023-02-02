@@ -5,14 +5,12 @@ import numpy as np
 import externalpaths
 
 from plotClusters import RPCluster
+sys.path.append(externalpaths.structureanalysistools())
 
 
-sys.path.append(externalpaths.arcplot())
-from arcPlot import ArcPlot
-from pmanalysis import PairMap
-
-sys.path.append(externalpaths.rnatools())
-import RNAtools2 as RNAtools
+from ArcPlot import ArcPlot
+from pairmap_analysis import PairMap
+import RNAStructureObjects as RNAtools
 import foldPK
 
 
@@ -137,7 +135,7 @@ if __name__=='__main__':
             aplot.addCT( RNAtools.CT(dfile[:-4]+'.ct') )
 
 
-        aplot.readDMSProfile(dfile)
+        aplot.readProfile(dfile, dms=True)
 
         if args.bp:
             aplot.addPairMap( PairMap(args.bp+'-{}-pairmap.txt'.format(i)), panel=-1)

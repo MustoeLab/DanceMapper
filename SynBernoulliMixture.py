@@ -3,12 +3,11 @@ import numpy as np
 import itertools, sys
 
 import externalpaths
-sys.path.append(externalpaths.ringmapper())
+sys.path.append(externalpaths.structureanalysistools())
 
 from DanceMapper import DanceMap
 from BernoulliMixture import BernoulliMixture
 from ReactivityProfile import ReactivityProfile
-
 
 
 class SynBernoulliMixture():
@@ -269,7 +268,7 @@ class SynBernoulliMixture():
             EM.profile.backprofile = np.zeros(self.mu.shape[1])+0.0001
 
         # normalize with DMS false because we don't have sequence info (it doesn't matter anyways)
-        EM.profile.backgroundSubtract(normalize=True, DMS=False) 
+        EM.profile.backgroundSubtract(normalize=True)
 
 
         if self.active_columns is None or self.inactive_columns is None:

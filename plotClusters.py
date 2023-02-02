@@ -12,12 +12,9 @@ import sys, itertools
 from scipy import stats
 
 from BernoulliMixture import BernoulliMixture
+
 import externalpaths
-
-sys.path.append(externalpaths.arcplot())
-import arcPlot
-
-sys.path.append(externalpaths.ringmapper())
+sys.path.append(externalpaths.structureanalysistools())
 from ReactivityProfile import ReactivityProfile
 
 
@@ -189,7 +186,7 @@ class RPCluster(object):
     def renormalize(self):
 
         for i in range(len(self.profiles)):
-            self.profiles[i].normalize(DMS=True)
+            self.profiles[i].normalize(eDMS=True)
 
 
 

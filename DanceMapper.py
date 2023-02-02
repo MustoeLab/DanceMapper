@@ -5,7 +5,12 @@ import datetime
 
 # get path to functions needed for mutstring I/O
 import externalpaths
+sys.path.append(externalpaths.structureanalysistools())
+from ReactivityProfile import ReactivityProfile
+
 sys.path.append(externalpaths.ringmapper())
+from ringmapper import RINGexperiment
+from pairmapper import PairMapper
 
 
 import accessoryFunctions as aFunc
@@ -13,15 +18,11 @@ from BernoulliMixture import BernoulliMixture
 
 
 
-from ReactivityProfile import ReactivityProfile
-from ringmapper import RINGexperiment
-from pairmapper import PairMapper
-
 
 
 class DanceMap(object):
 
-    def __init__(self, modfile=None, untfile=None, profilefile=None, seqlen=None, **kwargs):
+    def __init__(self, modfile=None, untfile=None, profilefile=None, seqlen=None, ignorebg=False, **kwargs):
         """Define important global parameters"""
     
         # reads contains positions that are 'read'
@@ -58,7 +59,7 @@ class DanceMap(object):
         
         
         if profilefile is not None:
-            self.init_profile(profilefile)
+            self.init_profile(profilefile, ignorebg)
 
         elif seqlen is not None:
             self.seqlen = seqlen
@@ -80,10 +81,16 @@ class DanceMap(object):
             self.initializeActiveCols(**kwargs)
 
 
-    def init_profile(self, profilefile):
+    def init_profile(self, profilefile, ignorebg=False):
 
         self.profile = ReactivityProfile(profilefile)
-        self.profile.normalize(DMS=True)
+        
+        if ignorebg or np.isnan(self.profile.backprofile).all():
+            # this logic makes sure subprofile is computed only using modified sample, while also
+            # filling backprofile with a baseline error rate for prior calculations
+            self.profile.backprofile.fill(0)
+            self.profile.subprofile = np.copy(self.profile.rawprofile)
+
         self.sequence = ''.join(self.profile.sequence)
         self.seqlen = len(self.sequence)
         self.ntindices = self.profile.nts
@@ -167,7 +174,7 @@ class DanceMap(object):
 
     def initializeActiveCols(self, invalidcols=[], inactivecols=[], invalidrate=0.0001, 
                              maxbg=0.02, minrxbg=0.002, verbal = True, maskG=False,
-                             maskU=False, **kwargs):
+                             maskU=False, maskN=False, **kwargs):
         """Apply quality filters to eliminate noisy nts from EM fitting
         invalidcols = list of columns to set to invalid
         inactivecols = list of columns to set inactive
@@ -217,7 +224,7 @@ class DanceMap(object):
         
         # check backprofile to exclude high bg positions
         highbg = []
-        if self.profile is not None:
+        if self.profile is not None and self.profile.backprofile is not None:
             for i, val in enumerate(self.profile.backprofile):
                 if val > maxbg and i not in invalidcols:
                     invalidcols.append(i)
@@ -283,8 +290,17 @@ class DanceMap(object):
                     inactive.append(i)
             
             print('Remaining U nts set inactive:'.format(self.ntindices[ucols]))
+        
 
+        if maskN:
+            ncols = []
+            for i,s in enumerate(self.sequence):
+                if s == 'N' and i not in self.invalid_columns and i not in inactive:
+                    ncols.append(i)
+                    inactive.append(i)
+            
        
+
         inactive.sort()
         self.inactive_columns = np.array(inactive, dtype=int)
 
@@ -462,7 +478,7 @@ class DanceMap(object):
         
 
         try:
-            if self.profile.backprofile is None:
+            if self.profile.backprofile is None or np.all(self.profile.backprofile==0):
                 priorWeight = -1
         except AttributeError:
             priorWeight = -1
@@ -510,6 +526,8 @@ class DanceMap(object):
             # (defaults used within BernoulliMixture are A=1, B=1)
             if priorWeight > 0:
                 BM.setPriors(priorWeight*self.profile.backprofile*np.sum(self.reads, axis=0), 1)
+            else:
+                BM.setPriors(1e-4*np.sum(self.reads, axis=0), 1)
 
 
             # fit the BM
@@ -788,7 +806,7 @@ class DanceMap(object):
 
 
 
-    def computeNormalizedReactivities(self):
+    def computeNormalizedReactivities(self, oldDMS=False):
         """From converged mu params and profile, compute normalized params"""
 
         model = self.BMsolution
@@ -799,9 +817,15 @@ class DanceMap(object):
         # create temporary profile containing maxs at each position to compute norm factors
         maxProfile = self.profile.copy()
         maxProfile.rawprofile = np.max(model.mu, axis=0)
-        maxProfile.backgroundSubtract()
-        normfactors = maxProfile.normalize(DMS=True)
+        maxProfile.backgroundSubtract(normalize=False)
 
+        if not oldDMS:
+            normfactors = maxProfile.normalize(eDMS=True)
+        else:
+            normfactors = maxProfile.normalize(oldDMS=True)
+
+
+        print(normfactors)
 
         # now create new normalized profiles
         profiles = []
@@ -809,11 +833,14 @@ class DanceMap(object):
         for p in xrange(model.pdim):
             prof = self.profile.copy()
             prof.rawprofile = np.copy(model.mu[p,:])
-            prof.backgroundSubtract()
+            prof.backgroundSubtract(normalize=False)
             
             for i,nt in enumerate(prof.sequence):
-                prof.normprofile[i] = prof.subprofile[i]/normfactors[nt]
-        
+                try:
+                    prof.normprofile[i] = prof.subprofile[i]/normfactors[nt]
+                except KeyError:
+                    prof.normprofile[i] = np.nan
+
             profiles.append(prof)
 
 
@@ -822,7 +849,7 @@ class DanceMap(object):
 
 
 
-    def writeReactivities(self, output):
+    def writeReactivities(self, output, oldDMS=False):
         """Print out model reactivities
         self.profile must be defined
         """
@@ -834,7 +861,7 @@ class DanceMap(object):
             return
         
         # compute normalized parameters
-        profiles = self.computeNormalizedReactivities()
+        profiles = self.computeNormalizedReactivities(oldDMS)
         
 
         with open(output, 'w') as OUT:
@@ -886,6 +913,9 @@ class DanceMap(object):
                 sys.stderr.write('active_columns in BMsolution and DanceMap object are different!\n')
                 sys.stderr.write('Updating DanceMap columns to BMsolution values\n')
             
+            invalids = np.where(self.BMsolution.mu[0,:] < 0)[0]
+            self.invalid_columns = invalids
+
             self.setColumns(activecols=self.BMsolution.active_columns, 
                             inactivecols=self.BMsolution.inactive_columns)    
         
@@ -955,7 +985,7 @@ class DanceMap(object):
                     ring.bg_comutarr = relist[0].bg_comutarr
                     ring.bg_inotjarr = relist[0].bg_inotjarr
             
-            ring.computeCorrelationMatrix(verbal=verbal, ignorents=self.invalid_columns)
+            ring.computeCorrelationMatrix(mincount=10, verbal=verbal, ignorents=self.invalid_columns)
             
             #ring.writeDataMatrices('ex', 't-{}-{}-{}-{}'.format(p,subtractwindow,assignprob,montecarlo))
 
@@ -975,7 +1005,6 @@ class DanceMap(object):
         Returns list of RINGexperiment objs
         window     = correlation window
         corrtype   = metric for computing correlations
-        bgfile     = parsed mutation file for bg sample (to filter out bg mutations)
         assignprob = posterior prob. used for assigning reads to models. If -1, assign reads as MAP
         subtractwindow = exclude nt window when assigning read for that window
         montecarlo = sample reads using MC logic
@@ -1171,7 +1200,7 @@ def parseArguments():
     fitopt.add_argument('--priorWeight', type=float, default=0.01, help='Weight of prior on Mu (default=0.01). Prior = priorWeight*readDepth*bgRate at each nt. Prior is disabled by passing -1, upon which a naive prior is used.')
     fitopt.add_argument('--maskG', action='store_true', help='set all Us to inactive')
     fitopt.add_argument('--maskU', action='store_true', help='set all Gs to inactive')
-
+    fitopt.add_argument('--maskN', action='store_true', help='set all Ns to inactive')
 
 
     ############################################################
@@ -1196,6 +1225,8 @@ def parseArguments():
     
     optional.add_argument('--untreated_parsed', help='Path to untreated parsed.mut file')
     optional.add_argument('--readfromfile', type=str, help='Read in solved BM model from BM file')
+    optional.add_argument('--ignore_untreated', action='store_true', help='Ignore untreated mutation rates from profile.txt file. If ShapeMapper was run without an untreated sample, this argument is superfluous. Untreated rates are used for establishing priors during fitting, and computing normalized rates)')
+    optional.add_argument('--oldDMSnorm', action='store_true', help='Use old style (pre-eDMS) normalization')
     optional.add_argument('--suppressverbal', action='store_false', help='Suppress verbal output')
     optional.add_argument('--outputprefix', type=str, default='emfit', help='Write output files with this prefix (default=emfit)')
     
@@ -1249,7 +1280,12 @@ if __name__=='__main__':
     
     # Log file messaging for keeping track of run info
     print(' '.join(sys.argv[:]))
-    print('\nStarting up DANCE-MaPper pipeline')
+    print('\nStarting up DANCE-Mapper pipeline')
+    
+    with open('VERSION.txt') as inp:
+        print(inp.readline())
+
+
     print('{:%Y-%m-%d %H:%M:%S}'.format(datetime.datetime.now()))
 
     args = parseArguments()
@@ -1261,8 +1297,10 @@ if __name__=='__main__':
                      minrxbg = args.minrxbg,
                      maskG = args.maskG,
                      maskU = args.maskU,
+                     maskN = args.maskN,
                      minreadcoverage=args.mincoverage, 
                      undersample=args.undersample,
+                     ignorebg=args.ignore_untreated,
                      verbal=args.suppressverbal)
        
     if args.fit:
@@ -1273,7 +1311,7 @@ if __name__=='__main__':
                          verbal=args.suppressverbal,
                          writeintermediate = args.writeintermediates)
 
-        DM.writeReactivities(args.outputprefix+'-reactivities.txt')
+        DM.writeReactivities(args.outputprefix+'-reactivities.txt', oldDMS=args.oldDMSnorm)
         DM.BMsolution.writeModel(args.outputprefix+'.bm')
 
 
@@ -1287,7 +1325,7 @@ if __name__=='__main__':
                           writeintermediate = args.writeintermediates,
                           forcefit = True)
 
-        DM.writeReactivities(args.outputprefix+'-reactivities.txt')
+        DM.writeReactivities(args.outputprefix+'-reactivities.txt', oldDMS=args.oldDMSnorm)
         DM.BMsolution.writeModel(args.outputprefix+'.bm')
 
     
@@ -1316,7 +1354,7 @@ if __name__=='__main__':
 
     if args.pairmap:
         
-        profiles = DM.computeNormalizedReactivities()
+        profiles = DM.computeNormalizedReactivities(args.oldDMSnorm)
         
         if args.suppressverbal:
                 print('--------------Computing PAIRs--------------')
@@ -1331,7 +1369,7 @@ if __name__=='__main__':
                 print('*******Model {}*******'.format(i))
 
 
-            model.writeCorrelations('{0}-{1}-allcorrs.txt'.format(args.outputprefix,i), 
+            model.writeCorrelations('{0}-{1}-allwin3corrs.txt'.format(args.outputprefix,i), 
                                     chi2cut=args.chisq_cut)
 
             pairs = PairMapper(model, profiles[i])
