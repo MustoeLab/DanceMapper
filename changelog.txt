@@ -1,0 +1,17 @@
+Version 1.1
+-----------
+
+-Fixed internal issues so untreated sample is now optional. Additionally added 
+the --ignore_untreated flag to ignore any untreated sample information in the
+profile.txt file
+
+
+-Updated mincount cutoffs for pair/ring analysis to 10 to be compatible with
+pair/ringmapper v1.2
+
+
+-Updated DMS normalization to eDMS by default. The --oldDMSnorm flag can be used 
+to perform normalization using original method
+
+-Changed dependency to consolidated StructureAnalysisTools package
+

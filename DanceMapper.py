@@ -923,7 +923,7 @@ class DanceMap(object):
 
  
 
-    def _sample_RINGs(self, window=1, corrtype='apc', bgfile=None, assignprob=0.9, 
+    def _sample_RINGs(self, window=1, corrtype='apc', bgfile=None, assignprob=0.9, mincount=10,
                       subtractwindow=True, montecarlo=False, verbal=True):
         """Assign sample reads based on posterior prob and return list of RINGexperiment objs
         window     = correlation window
@@ -985,7 +985,7 @@ class DanceMap(object):
                     ring.bg_comutarr = relist[0].bg_comutarr
                     ring.bg_inotjarr = relist[0].bg_inotjarr
             
-            ring.computeCorrelationMatrix(mincount=10, verbal=verbal, ignorents=self.invalid_columns)
+            ring.computeCorrelationMatrix(mincount=mincount, verbal=verbal, ignorents=self.invalid_columns)
             
             #ring.writeDataMatrices('ex', 't-{}-{}-{}-{}'.format(p,subtractwindow,assignprob,montecarlo))
 
@@ -998,7 +998,7 @@ class DanceMap(object):
 
  
 
-    def _null_RINGs(self, window=1, corrtype='g', assignprob=0.9, 
+    def _null_RINGs(self, window=1, corrtype='g', assignprob=0.9, mincount=10,
                     subtractwindow=True, montecarlo=False, verbal=False):
         """Create null (uncorrelated) model and assign reads based on posterior prob 
         to determine null-model correlations. 
@@ -1061,7 +1061,7 @@ class DanceMap(object):
             ring.ex_comutarr = comut[p]
             ring.ex_inotjarr = inotj[p]
             
-            ring.computeCorrelationMatrix(mincount=10, ignorents=self.invalid_columns, verbal=verbal)
+            ring.computeCorrelationMatrix(mincount=mincount, ignorents=self.invalid_columns, verbal=verbal)
             #ring.writeDataMatrices('ex', 'null-{}.txt'.format(p))
             relist.append(ring)
             
@@ -1069,7 +1069,7 @@ class DanceMap(object):
 
 
 
-    def computeRINGs(self, window=1, bgfile=None, assignprob=0.9,
+    def computeRINGs(self, window=1, bgfile=None, assignprob=0.9, mincount=10,
                      subtractwindow=True, montecarlo=False, nulldifftest=True, verbal=True):
         """Compute RINGs based on posterior prob and mask out (i,j) pairs that are
         observed in null (uncorrelated) model. 
@@ -1085,7 +1085,7 @@ class DanceMap(object):
  
 
         # compute rings from experimental data
-        sample = self._sample_RINGs(window=window, bgfile=bgfile, assignprob=assignprob, 
+        sample = self._sample_RINGs(window=window, bgfile=bgfile, assignprob=assignprob, mincount=mincount,
                                     subtractwindow=subtractwindow, montecarlo=montecarlo, verbal=verbal) 
         
         if not nulldifftest:
@@ -1093,7 +1093,7 @@ class DanceMap(object):
 
 
         # compute correlations from null model (clustering only w/o correlations)
-        null = self._null_RINGs(window=window, assignprob=assignprob, 
+        null = self._null_RINGs(window=window, assignprob=assignprob, mincount=10,
                                 subtractwindow=subtractwindow, montecarlo=montecarlo) 
 
 
@@ -1213,6 +1213,9 @@ def parseArguments():
     ringopt.add_argument('--pairmap', action='store_true', help='Run PAIR-MaP analysis on clustered reads') 
     ringopt.add_argument('--readprob_cut', type=float, default=0.9, help='Posterior probability cutoff for assigning reads for inclusion in ring/pairmap analysis. Reads must have posterior prob greater than the cutoff (default=0.9). If set to -1, assign reads using maximum a posteriori (MAP) criteria')
     ringopt.add_argument('--chisq_cut', type=float, default=23.9, help="Set chisq cutoff for RING/PAIR-MaP analysis (default = 23.9)")
+    ringopt.add_argument('--mincount', type=float, default=10, help="Set mincount cutoff for RING/PAIR-MaP analysis (default = 10)")
+    ringopt.add_argument('--pair_secondary_reactivity', type=float, default=0.4 help="Set secondary_reactivity cutoff for pairmapper analysis (default = 0.4)")
+    
 
     # note the below logic is a bit confusing because the internal variables are different than
     # external names. Internally, the variable is subtractWindow. By default this should be True.
@@ -1282,8 +1285,8 @@ if __name__=='__main__':
     print(' '.join(sys.argv[:]))
     print('\nStarting up DANCE-Mapper pipeline')
     
-    with open('VERSION.txt') as inp:
-        print(inp.readline())
+    import version
+    version.print_version()
 
 
     print('{:%Y-%m-%d %H:%M:%S}'.format(datetime.datetime.now()))
@@ -1343,7 +1346,7 @@ if __name__=='__main__':
                 print('--------------Computing RINGs--------------')
 
 
-        RE_list = DM.computeRINGs(window=args.window, bgfile=args.untreated_parsed, subtractwindow=args.inclwindow,
+        RE_list = DM.computeRINGs(window=args.window, bgfile=args.untreated_parsed, subtractwindow=args.inclwindow, mincount=args.mincount,
                                   assignprob=args.readprob_cut, verbal=args.suppressverbal)
 
         for i,model in enumerate(RE_list):
@@ -1360,7 +1363,7 @@ if __name__=='__main__':
                 print('--------------Computing PAIRs--------------')
 
 
-        RE_list = DM.computeRINGs(window=3, bgfile=args.untreated_parsed, subtractwindow=args.inclwindow,
+        RE_list = DM.computeRINGs(window=3, bgfile=args.untreated_parsed, subtractwindow=args.inclwindow, mincount=args.mincount,
                                   assignprob=args.readprob_cut, verbal=args.suppressverbal)
 
         for i,model in enumerate(RE_list):
@@ -1369,10 +1372,10 @@ if __name__=='__main__':
                 print('*******Model {}*******'.format(i))
 
 
-            model.writeCorrelations('{0}-{1}-allwin3corrs.txt'.format(args.outputprefix,i), 
+            model.writeCorrelations('{0}-{1}-allcorrs.txt'.format(args.outputprefix,i), 
                                     chi2cut=args.chisq_cut)
 
-            pairs = PairMapper(model, profiles[i])
+            pairs = PairMapper(model, profiles[i], secondary_reactivity=args.pair_secondary_reactivity)
             pairs.writePairs('{0}-{1}-pairmap.txt'.format(args.outputprefix, i))
             pairs.writePairBonusFile('{0}-{1}-pairmap.bp'.format(args.outputprefix, i))      
 
