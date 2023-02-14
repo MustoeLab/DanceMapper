@@ -1214,7 +1214,7 @@ def parseArguments():
     ringopt.add_argument('--readprob_cut', type=float, default=0.9, help='Posterior probability cutoff for assigning reads for inclusion in ring/pairmap analysis. Reads must have posterior prob greater than the cutoff (default=0.9). If set to -1, assign reads using maximum a posteriori (MAP) criteria')
     ringopt.add_argument('--chisq_cut', type=float, default=23.9, help="Set chisq cutoff for RING/PAIR-MaP analysis (default = 23.9)")
     ringopt.add_argument('--mincount', type=float, default=10, help="Set mincount cutoff for RING/PAIR-MaP analysis (default = 10)")
-    ringopt.add_argument('--pair_secondary_reactivity', type=float, default=0.4 help="Set secondary_reactivity cutoff for pairmapper analysis (default = 0.4)")
+    ringopt.add_argument('--pair_secondary_reactivity', type=float, default=0.4, help="Set secondary_reactivity cutoff for pairmapper analysis (default = 0.4)")
     
 
     # note the below logic is a bit confusing because the internal variables are different than
