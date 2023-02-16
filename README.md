@@ -3,7 +3,7 @@ ML clustering code and associated analysis scripts for deconvoluting RNA ensembl
 from single-molecule DMS-MaP datasets
 
 -----------------------------------------
-Copywrite 2022 Anthony Mustoe
+Copywrite 2023 Anthony Mustoe
 
 This project is licensed under the terms of the MIT license
 
@@ -23,7 +23,7 @@ Dependencies
 
 - cython 
 
-- Ringmapper/Pairmapper package (v1.1)
+- Ringmapper/Pairmapper package (v1.2)
     available at https://github.com/Weeks-UNC/RingMapper
 
 - StructureAnalysisTools (needed for plotClusters and foldClusters)
@@ -45,7 +45,7 @@ Installation
 
 ShapeMapper preprocessing
 -----------------------
-DanceMapper requires initial preprocessing of sequencing reads by ShapeMapper2 (v2.1.5 is preferred). 
+DanceMapper requires initial preprocessing of sequencing reads by ShapeMapper2 (v2.2 is preferred). 
 ShapeMapper2 should be run with the *--output-parsed-mutations* option.
 ShapeMapper2 can be obtained at https://github.com/Weeks-UNC/shapemapper2
 
@@ -154,7 +154,7 @@ Some generic example commands are below:
 
 *Preprocess data*
 
-    shapemapper --target add.fa --name example --amplicon --output-parsed \
+    shapemapper --target add.fa --name example --amplicon --output-parsed --dms \
     --modified --R1 example-mod_R1.fastq.gz --R2 example-mod_R2.fastq.gz \
     --untreated --R1 example-neg_R1.fastq.gz --R2 example-neg_R2.fastq.gz
 
