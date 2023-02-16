@@ -103,7 +103,7 @@ Output:
 
 *Note* PAIR/RING calculations have modestly changed from v1.0. To run using original parameters, 
 use the following flags:
---oldDMSnorm --pair_secondary_reactivity 0.5 --mincount 50
+--oldDMSnorm --pm_secondary_reactivity 0.5 --mincount 50
 
 
 foldClusters.py

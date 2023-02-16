@@ -1206,7 +1206,7 @@ def parseArguments():
     ############################################################
     # RING options
     
-    ringopt = parser.add_argument_group('options for performing RING analysis on clustered reads')
+    ringopt = parser.add_argument_group('options for performing RING/PAIR analysis on clustered reads')
     ringopt.add_argument('--ring', action='store_true')
     ringopt.add_argument('--window', type=int, default=1, help='Window size for computing correlations (default=1)')
 
@@ -1214,7 +1214,7 @@ def parseArguments():
     ringopt.add_argument('--readprob_cut', type=float, default=0.9, help='Posterior probability cutoff for assigning reads for inclusion in ring/pairmap analysis. Reads must have posterior prob greater than the cutoff (default=0.9). If set to -1, assign reads using maximum a posteriori (MAP) criteria')
     ringopt.add_argument('--chisq_cut', type=float, default=23.9, help="Set chisq cutoff for RING/PAIR-MaP analysis (default = 23.9)")
     ringopt.add_argument('--mincount', type=float, default=10, help="Set mincount cutoff for RING/PAIR-MaP analysis (default = 10)")
-    ringopt.add_argument('--pair_secondary_reactivity', type=float, default=0.4, help="Set secondary_reactivity cutoff for pairmapper analysis (default = 0.4)")
+    ringopt.add_argument('--pm_secondary_reactivity', type=float, default=0.4, help="Set secondary_reactivity cutoff for pairmapper analysis (default = 0.4)")
     
 
     # note the below logic is a bit confusing because the internal variables are different than
@@ -1375,7 +1375,7 @@ if __name__=='__main__':
             model.writeCorrelations('{0}-{1}-allcorrs.txt'.format(args.outputprefix,i), 
                                     chi2cut=args.chisq_cut)
 
-            pairs = PairMapper(model, profiles[i], secondary_reactivity=args.pair_secondary_reactivity)
+            pairs = PairMapper(model, profiles[i], secondary_reactivity=args.pm_secondary_reactivity)
             pairs.writePairs('{0}-{1}-pairmap.txt'.format(args.outputprefix, i))
             pairs.writePairBonusFile('{0}-{1}-pairmap.bp'.format(args.outputprefix, i))      
 
