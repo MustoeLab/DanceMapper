@@ -1,17 +1,52 @@
+Version 1.2
+August 30, 2023
+Lucas Kearns <lucas.kearns@bcm.edu>, Thomas Miller <thomas.miller2@bcm.edu>
+***********************************************************************
+
+ADDED:
+
+Added --concat flag. This will concatenate mut and corresponding mutga files
+together. By default N7-Gs do not contribute to clustering but are set to
+inactive. This means that although N7-G positions do not drive clustering they will be 
+solved for in the final model.
+
+Added --activate_n7 flag. Allows n7 nucleotides to contribute to DanceMap
+clustering. By default N7-G nucleotides will not contribute to clustering.
+
+Added ability for concatenated DanceMapper runs to use RingMapper on solved models
+and generate N1/3-N1/3, N1/3-N7G, and N7G-N7G rings.
+
+CHANGED:
+
+Updated eDMS normalization to reflect new pur and pyr normalization cases
+for N7-G. Changed eDMS so highly protected N7-G regions (ares where bg is higher than
+raw) are assigned a normalized reactivity of 3.32.
+
+FIXED:
+
+Debugged min coverage calculation to properly calculate 75% coverage
+threshold.
+
 Version 1.1
------------
+February 1, 2023
+Anthony Mustoe <anthony.mustoe@bcm.edu>
+***********************************************************************
 
--Fixed internal issues so untreated sample is now optional. Additionally added 
-the --ignore_untreated flag to ignore any untreated sample information in the
-profile.txt file
+ADDED:
 
+Added --ignore_untreated flag to ignore any untreated sample information in the
+profile.txt file.
 
--Updated mincount cutoffs for pair/ring analysis to 10 to be compatible with
-pair/ringmapper v1.2
+CHANGED:
 
-
--Updated DMS normalization to eDMS by default. The --oldDMSnorm flag can be used 
+Updated DMS normalization to eDMS by default. The --oldDMSnorm flag can be used 
 to perform normalization using original method
 
--Changed dependency to consolidated StructureAnalysisTools package
+Updated mincount cutoffs for pair/ring analysis to 10 to be compatible with
+pair/ringmapper v1.2
 
+Changed dependency to consolidated StructureAnalysisTools package
+
+FIXED:
+
+Fixed internal issues so untreated sample is now optional. 

@@ -12,8 +12,8 @@ import sys, itertools
 from scipy import stats
 
 from BernoulliMixture import BernoulliMixture
-
 import externalpaths
+
 sys.path.append(externalpaths.structureanalysistools())
 from ReactivityProfile import ReactivityProfile
 
@@ -278,14 +278,17 @@ def plotClusterProfile(clustobj, out=None, modelNums=None):
     
     fig, ax = plot.subplots()
     for i,p in enumerate(clustobj.p):
-
+	if i == 0:
+            alpha_ = 1.0
+        else:
+            alpha_ = 0.5
         if modelNums is not None and i not in modelNums:
             continue
         
         with np.errstate(invalid='ignore'):
             mask = clustobj.rawprofiles[i]>-1
 
-        ax.step(xvals[mask], clustobj.rawprofiles[i][mask], label='p={0:.2f}'.format(p), where='mid')
+        ax.step(xvals[mask], clustobj.rawprofiles[i][mask], alpha=alpha_, label='p={0:.2f}'.format(p), where='mid')
    
     for c in mergeColumns(clustobj.inactive_columns):
         ax.axvspan(c[0],c[1], color='gray', alpha=0.2)
@@ -330,14 +333,17 @@ def plotClusterComparison(clust1, clust2, name1='', name2='', out=None, align=Fa
     
 
     for i,p in enumerate(clust1.p):
-        
+        if i == 0:
+            alpha_ = 1.0
+        else:
+            alpha_ = 0.5
         with np.errstate(invalid='ignore'):
             mask = (clust1.rawprofiles[i]>-1) & (clust2.rawprofiles[i]>-1)
         
-        ax[i].step(xvals[mask], clust1.rawprofiles[i][mask], where='mid',
+        ax[i].step(xvals[mask], clust1.rawprofiles[i][mask],alpha=alpha_, where='mid',
                    label='{0} p={1:.2f}'.format(name1, p))
 
-        ax[i].step(xvals[mask], clust2.rawprofiles[c2idx[i]][mask], where='mid',
+        ax[i].step(xvals[mask], clust2.rawprofiles[c2idx[i]][mask], alpha=alpha_, where='mid',
                    label='{0} p={1:.2f}'.format(name2, clust2.p[c2idx[i]]))
         
 
@@ -428,21 +434,28 @@ def mergeColumns(columns):
 
 def plotReactProfile(rpclust, out=None, modelNums=None, ptype=None):
 
+    
+
     fig, ax = plot.subplots()
     
     xvals = rpclust.profiles[0].nts 
-    
+
     for i,p in enumerate(rpclust.population):
-        
+        if i == 0:
+            alpha_ = 1.0
+        else:
+            alpha_ = 0.5
         if modelNums is not None and i not in modelNums:
             continue
 
         with np.errstate(invalid='ignore'):
-            mask = rpclust.profiles[i].normprofile >-1
+            mask = np.isfinite(rpclust.profiles[i].normprofile)
         
-        prof = rpclust.profiles[i].profile(ptype)
-        ax.step(xvals[mask], prof[mask], where='mid', label='p={:.2f}'.format(p))
-    
+        #convert invalid positions to 0 in our profile to ensure the steps align with the data
+        prof = np.nan_to_num(rpclust.profiles[i].profile(ptype))
+	
+        ax.step(xvals, prof,alpha=alpha_, where='mid', label='p={:.2f}'.format(p))
+   	 
     
     for c in mergeColumns(np.where(np.isnan(rpclust.profiles[0].normprofile))[0]):
         ax.axvspan(c[0],c[1], color='gray', alpha=0.6)
@@ -479,7 +492,7 @@ def plotReactProfileComparison(rp1, rp2, name1='', name2='', ptype=None, out=Non
 
     
     xvals = rp1.profiles[0].nts
-    
+
     fig, ax = plot.subplots(nrows=max(2,len(rp1.population)), ncols=1)
    
     if align:
@@ -489,15 +502,18 @@ def plotReactProfileComparison(rp1, rp2, name1='', name2='', ptype=None, out=Non
     
 
     for i,p in enumerate(rp1.population):
-        
+        if i == 0:
+            alpha_ = 1.0
+        else:
+            alpha_ = 0.5
         with np.errstate(invalid='ignore'):
-            mask = (rp1.profiles[i].rawprofile>-1) & (rp2.profiles[i].rawprofile>-1)
+            mask = np.isfinite(rp1.profiles[i].rawprofile) & np.isfinite(rp2.profiles[i].rawprofile)
         
-        prof1 = rp1.profiles[i].profile(ptype)
-        prof2 = rp2.profiles[i].profile(ptype)
+        prof1 = np.nan_to_num(rp1.profiles[i].profile(ptype))
+        prof2 = np.nan_to_num(rp2.profiles[i].profile(ptype))
 
-        ax[i].step(xvals[mask], prof1[mask], where='mid', label='{0} p={1:.2f}'.format(name1, p))
-        ax[i].step(xvals[mask], prof2[mask], where='mid', label='{0} p={1:.2f}'.format(name2, rp2.population[c2idx[i]]))
+        ax[i].step(xvals, prof1, alpha=alpha_, where='mid', label='{0} p={1:.2f}'.format(name1, p))
+        ax[i].step(xvals, prof2, alpha=alpha_, where='mid', label='{0} p={1:.2f}'.format(name2, rp2.population[c2idx[i]]))
         
 
         for c in mergeColumns(rp1.inactive_columns):

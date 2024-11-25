@@ -1,7 +1,10 @@
-
+import os
 import numpy as np
 import sys, argparse, itertools
 import datetime
+import warnings
+#suppress warning from cython when using a different version of numpy vs what cython compiled
+warnings.filterwarnings("ignore", message="numpy.dtype size changed")
 
 # get path to functions needed for mutstring I/O
 import externalpaths
@@ -15,6 +18,8 @@ from pairmapper import PairMapper
 
 import accessoryFunctions as aFunc
 from BernoulliMixture import BernoulliMixture
+import concat_profile_mut_N as concat_prof_mut
+import de_cat_N7_N13 as de_cat
 
 
 
@@ -22,7 +27,7 @@ from BernoulliMixture import BernoulliMixture
 
 class DanceMap(object):
 
-    def __init__(self, modfile=None, untfile=None, profilefile=None, seqlen=None, ignorebg=False, **kwargs):
+    def __init__(self, modfile=None, untfile=None, profilefile=None, seqlen=None, ignorebg=False, concat=False, **kwargs):
         """Define important global parameters"""
     
         # reads contains positions that are 'read'
@@ -56,7 +61,21 @@ class DanceMap(object):
         
         # contains final BMsolution, if fitting done
         self.BMsolution = None
-        
+
+        # Arrays for ring experiments
+        self.ring_read = None
+        self.ring_comut = None
+        self.ring_inotj = None
+        self.null_read = None
+        self.null_comut = None
+        self.null_inotj = None
+
+        self.concat=concat
+        if self.concat:
+           self.inactivate_n7 = kwargs["inactivate_n7"]
+           #print "Inactivate N7: {} ".format(self.inactivate_n7)
+        else:
+           self.inactivate_n7 = None
         
         if profilefile is not None:
             self.init_profile(profilefile, ignorebg)
@@ -71,6 +90,7 @@ class DanceMap(object):
         if modfile is not None:
             self.readPrimaryData(modfile, **kwargs)
         
+
         # if provided, now update self.profile.backprofile with rate computed 
         # using reads filtered according to same criteria for primary data
         if untfile is not None:
@@ -79,6 +99,8 @@ class DanceMap(object):
         
         if self.reads is not None:
             self.initializeActiveCols(**kwargs)
+
+
 
 
     def init_profile(self, profilefile, ignorebg=False):
@@ -99,8 +121,15 @@ class DanceMap(object):
 
 
     def readPrimaryData(self, modfilename, minreadcoverage=None, undersample=-1, **kwargs):
-        
         # Determine mincoverage quality filter
+
+
+        #Hacky way to ensure primers are NaN'd out of the default read coverage. Before this the 
+        #only options NaN'd out in the normProfile were Nts where the background was greater than
+        # .02. All the rest, including primers, remained not NaN.
+        if self.profile is not None:
+           self.profile.normalize()
+
         if minreadcoverage is None and self.minreadcoverage is None:
             
             minreadcoverage = self.seqlen
@@ -109,8 +138,13 @@ class DanceMap(object):
             if self.profile is not None:
                 minreadcoverage -= np.sum(np.isnan(self.profile.normprofile))
 
+
+
             self.minreadcoverage = int(round(minreadcoverage*0.75))
-            
+
+            # Avoid erroneous doubling of minreadcoverage due to concatenation
+            if self.concat:
+                self.minreadcoverage = int(round(self.minreadcoverage / 2))
             print('No mincoverage specified. Using default 75% coverage = {} nts'.format(self.minreadcoverage))
         
 
@@ -193,7 +227,6 @@ class DanceMap(object):
         
         # copy so we don't modify argument
         invalidcols = list(invalidcols)
-
         if verbal and len(invalidcols)>0:
             print("Nts {} set invalid by user".format(self.ntindices[invalidcols]))
 
@@ -201,6 +234,8 @@ class DanceMap(object):
         # supplement invalid cols from profile, checking for nans
         profilenan = []
         if self.profile is not None:
+
+
             for i, val in enumerate(self.profile.normprofile):
                 if val != val and i not in invalidcols:
                     invalidcols.append(i)
@@ -214,6 +249,7 @@ class DanceMap(object):
         signal = np.sum(self.mutations, axis=0, dtype=np.float)
         
         lowsignal = []         
+
         for i in np.where(signal < invalidrate*self.numreads)[0]:
             if i not in invalidcols:
                 lowsignal.append(i)
@@ -259,6 +295,9 @@ class DanceMap(object):
         
         # determine low reactivity cols
         lowrx = []
+
+
+
         if self.profile is not None:
             with np.errstate(invalid='ignore'):
                 for i in np.where(self.profile.subprofile < minrxbg)[0]:
@@ -269,6 +308,7 @@ class DanceMap(object):
 
         if verbal and len(lowrx) > 0:
             print("Nts {} set to inactive due to low modification rate".format(self.ntindices[lowrx]))
+
 
         
         # handle G and U nts
@@ -300,6 +340,29 @@ class DanceMap(object):
                     inactive.append(i)
             
        
+
+        #IF N7 and inactivate_n7 (check kwargs) then 
+            #For column in N7 columns if column not in invalid and not in inactive, append
+        if self.concat:
+           if self.inactivate_n7:
+              for i, nt in enumerate(self.sequence[len(self.sequence)/2:]):
+                 
+                 i_adjust = i + len(self.sequence) / 2
+                 
+
+
+                 if i_adjust not in self.invalid_columns and i_adjust not in inactive:
+                    
+                    inactive.append(i_adjust)
+
+           else:
+              for i, nt in enumerate(self.sequence[len(self.sequence)/2:]):
+                 i_adjust = i + len(self.sequence) / 2
+
+                 if i_adjust in inactive and i_adjust in self.invalid_columns:
+                    print("Error! nt in both inactive and invalid")
+                 #elif i_adjust not in self.invalid_columns and i_adjust not in inactive:
+                 #   print("{} is active".format(i_adjust))
 
         inactive.sort()
         self.inactive_columns = np.array(inactive, dtype=int)
@@ -804,10 +867,89 @@ class DanceMap(object):
         print('-----------------------------------------\n')
        
 
+    def splitProfile(self, maxProfile):
+        """ Splits profile in two. Divides each attribute in half amongst
+            two different profiles and returns the value.
+        """
+    
+        sequence = maxProfile.sequence
+        nts = maxProfile.nts
+        rawprofile, rawerror = maxProfile.profile('raw', True)
+        subprofile, suberror = maxProfile.profile('sub', True)
+        backprofile, backerror = maxProfile.profile('back', True)
+        normprofile, normerror = maxProfile.profile('norm', True)
+
+        N13Profile = self.profile.copy()
+        N7Profile = self.profile.copy()
+
+        N13Profile.sequence = sequence[:len(sequence)/2]
+        N13Profile.nts = nts[:len(nts)/2]
+        N13Profile.rawprofile = rawprofile[:len(rawprofile)/2]
+        N13Profile.rawerror = rawerror[:len(rawerror)/2]
+        N13Profile.backprofile = backprofile[:len(backprofile)/2]
+        N13Profile.backerror = backerror[:len(backerror)/2]
+        N13Profile.normprofile = normprofile[:len(normprofile)/2]
+        N13Profile.subprofile = subprofile[:len(subprofile)/2]
+        N13Profile.suberror = suberror[:len(suberror)/2]
 
 
-    def computeNormalizedReactivities(self, oldDMS=False):
-        """From converged mu params and profile, compute normalized params"""
+        N7Profile.sequence = sequence[len(sequence)/2:]
+        N7Profile.nts = nts[len(nts)/2:]
+        N7Profile.rawprofile = rawprofile[len(rawprofile)/2:]
+        N7Profile.rawerror = rawerror[len(rawerror)/2:]
+        N7Profile.backprofile = backprofile[len(backprofile)/2:]
+        N7Profile.backerror = backerror[len(backerror)/2:]
+        N7Profile.normprofile = normprofile[len(normprofile)/2:]
+        N7Profile.subprofile = subprofile[len(subprofile)/2:]
+        N7Profile.suberror = suberror[len(suberror)/2:]
+        
+
+        return N13Profile, N7Profile
+
+    def joinProfile(self, N13prof, N7prof):
+        """
+            Joins two profiles together. Concatenates each attribute.
+        """
+        cat_prof = N13prof.copy() 
+    
+        sequenceN13 = N13prof.sequence
+        ntsN13 = N13prof.nts
+        rawprofileN13, rawerrorN13 = N13prof.profile('raw', True)
+        subprofileN13, suberrorN13 = N13prof.profile('sub', True)
+        backprofileN13, backerrorN13 = N13prof.profile('back', True)
+        normprofileN13, normerrorN13 = N13prof.profile('norm', True)
+
+        sequenceN7 = N7prof.sequence
+        ntsN7 = N7prof.nts
+        rawprofileN7, rawerrorN7 = N7prof.profile('raw', True)
+        subprofileN7, suberrorN7 = N7prof.profile('sub', True)
+        backprofileN7, backerrorN7 = N7prof.profile('back', True)
+        normprofileN7, normerrorN7 = N7prof.profile('norm', True)
+
+
+        cat_prof.sequence = np.concatenate((sequenceN13, sequenceN7))
+        cat_prof.nts = np.concatenate((ntsN13, ntsN7))
+        cat_prof.rawprofile = np.concatenate((rawprofileN13, rawprofileN7))
+        cat_prof.rawerror = np.concatenate((rawerrorN13, rawerrorN7))
+        cat_prof.subprofile = np.concatenate((subprofileN13, subprofileN7))
+        cat_prof.suberror = np.concatenate((suberrorN13, suberrorN7))
+        cat_prof.backprofile = np.concatenate((backprofileN13, backprofileN7))
+        cat_prof.backerror = np.concatenate((backerrorN13, backerrorN7))
+        cat_prof.normprofile = np.concatenate((normprofileN13, normprofileN7))
+        cat_prof.normerror = np.concatenate((normerrorN13, normerrorN7))
+
+
+
+        return cat_prof
+
+
+    #Normalize profile
+    def computeNormalizedReactivities(self, oldDMS=False, concat=False):
+        """From converged mu params and profile, compute normalized params
+           If the data run is concatenated - will normalize the first half 
+           of the data in accordance with standard N1/3 normalization
+           and the second half with N7 normalization. 
+        """
 
         model = self.BMsolution
         
@@ -818,38 +960,119 @@ class DanceMap(object):
         maxProfile = self.profile.copy()
         maxProfile.rawprofile = np.max(model.mu, axis=0)
         maxProfile.backgroundSubtract(normalize=False)
+        
 
-        if not oldDMS:
-            normfactors = maxProfile.normalize(eDMS=True)
+        if concat:
+
+           #Split maxProfile into N1/3 half and N7 half
+           N13maxProfile, N7maxProfile = self.splitProfile(maxProfile) 
+           
+           if not oldDMS:
+               normfactors = N13maxProfile.normalize(eDMS=True)
+               normFactorN7 = N7maxProfile.normalize(eDMS=True, N7=True)
+               
+           else:
+               normfactors = maxProfile.normalize(oldDMS=True)
+        
+
+
         else:
-            normfactors = maxProfile.normalize(oldDMS=True)
+           if not oldDMS:
+               normfactors = maxProfile.normalize(eDMS=True)
+           else:
+               normfactors = maxProfile.normalize(oldDMS=True)
 
 
-        print(normfactors)
+        
 
         # now create new normalized profiles
         profiles = []
 
+
+
+
+        
         for p in xrange(model.pdim):
-            prof = self.profile.copy()
-            prof.rawprofile = np.copy(model.mu[p,:])
-            prof.backgroundSubtract(normalize=False)
+
             
-            for i,nt in enumerate(prof.sequence):
-                try:
-                    prof.normprofile[i] = prof.subprofile[i]/normfactors[nt]
-                except KeyError:
-                    prof.normprofile[i] = np.nan
+            #If concat
+            if concat:
+                catprofile = self.profile.copy()
+                N13prof, N7prof = self.splitProfile(catprofile)
 
-            profiles.append(prof)
+                
+                N13prof.rawprofile = np.copy(model.mu[p,:][:len(model.mu[p,:])/2])
+                N7prof.rawprofile = np.copy(model.mu[p,:][len(model.mu[p,:])/2:])
+                
+                N13prof.backgroundSubtract(normalize=False)
+                N7prof.backgroundSubtract(normalize=False)
+
+                for i,nt in enumerate(N13prof.sequence):
+                    try:
+                        N13prof.normprofile[i] = N13prof.subprofile[i]/normfactors[nt]
+                    except KeyError:
+                        prof.normprofile[i] = np.nan
 
 
+                for i, nt in enumerate(N7prof.sequence):
+                    try:
+                        if not np.isnan(N7prof.subprofile[i]):
+                           if nt in normFactorN7 and np.isfinite(normFactorN7[nt]):
+                               if i + 1 < len(N7prof.subprofile):
+                                   if N7prof.subprofile[i] < 0:
+                                       print("Setting NT {} to 3.32 since the background subtracted value is less than 0".format(i))
+                                       N7prof.normprofile[i] = 3.32
+                                   elif N7prof.sequence[i+1] == 'A' or N7prof.sequence[i+1] == 'N':
+                                       N7prof.normprofile[i] = np.log2(normFactorN7['g_pur']/N7prof.subprofile[i])
+                                   else:
+                                       N7prof.normprofile[i] = np.log2(normFactorN7['g_pyr']/N7prof.subprofile[i])
+                                
+
+                        else: 
+                            N7prof.normprofile[i] = np.nan
+
+
+                
+
+
+                    except Exception as e:
+                        print("Error, exception e: ", e)
+
+
+                #CHECK N7 and N13 outputs
+            
+                cat_profile = self.joinProfile(N13prof, N7prof)
+                profiles.append(cat_profile)
+
+            #Else
+            else:
+               prof = self.profile.copy()
+               prof.rawprofile = np.copy(model.mu[p,:])
+               prof.backgroundSubtract(normalize=False)
+               
+               for i,nt in enumerate(prof.sequence):
+                   try:
+                       prof.normprofile[i] = prof.subprofile[i]/normfactors[nt]
+                   except KeyError:
+                       prof.normprofile[i] = np.nan
+
+            
+            
+            
+        
+            
+               profiles.append(prof)
+
+
+        
+
+        
         return profiles
 
 
 
 
-    def writeReactivities(self, output, oldDMS=False):
+    def writeReactivities(self, output, oldDMS=False, concat=False):
         """Print out model reactivities
         self.profile must be defined
         """
@@ -861,8 +1084,7 @@ class DanceMap(object):
             return
         
         # compute normalized parameters
-        profiles = self.computeNormalizedReactivities(oldDMS)
-        
+        profiles = self.computeNormalizedReactivities(oldDMS, concat)
 
         with open(output, 'w') as OUT:
 
@@ -887,6 +1109,8 @@ class DanceMap(object):
                 else:
                     for prof in profiles:
                         muline += '{0:.4f}\t{1:.4f}\t\t'.format(prof.normprofile[nt], prof.rawprofile[nt])
+                        
+                        
                     
                     muline += '{0:.4f}'.format(self.profile.backprofile[nt])
 
@@ -924,7 +1148,7 @@ class DanceMap(object):
  
 
     def _sample_RINGs(self, window=1, corrtype='apc', bgfile=None, assignprob=0.9, mincount=10,
-                      subtractwindow=True, montecarlo=False, verbal=True):
+                      subtractwindow=True, montecarlo=False, verbal=True, N7=False, concat=False, fasta=None):
         """Assign sample reads based on posterior prob and return list of RINGexperiment objs
         window     = correlation window
         corrtype   = metric for computing correlations
@@ -932,7 +1156,8 @@ class DanceMap(object):
         assignprob = posterior prob. used for assigning reads to models. If -1, assign reads as MAP
         subtractwindow = exclude nt window when assigning read for that window
         montecarlo = sample reads using MC logic
-        verbal     = verbal"""
+        verbal     = verbal
+        N7 = N7"""
 
         
         # setup the activestatus mask. Assign reads using both active & inactive cols
@@ -943,54 +1168,105 @@ class DanceMap(object):
         
         # fill in the matrices
         if montecarlo:
+            #deprecated should probably remove
             if verbal:
                 print('Using MC for sample RING read assignment')
             
             raise AttributeError('Monte Carlo option has been removed')
+            
             read, comut, inotj = aFunc.fillRINGMatrix_montecarlo(self.reads, self.mutations, activestatus,
                                                                  self.BMsolution.mu, self.BMsolution.p, 
                                                                  window, self.reads.shape[0], subtractwindow)
+            
         
         else:
             if verbal:
                 print('Using {:.3f} as posterior prob for sample RING read assignment'.format(assignprob))
-
-            read, comut, inotj = aFunc.fillRINGMatrix(self.reads, self.mutations, activestatus,
+            #check to see if we've already filled the matrices for this window to prevent redundant calculation
+            if self.ring_read is None and self.ring_comut is None and self.ring_inotj is None:
+                self.ring_read, self.ring_comut, self.ring_inotj = aFunc.fillRINGMatrix(self.reads, self.mutations, activestatus,
                                                       self.BMsolution.mu, self.BMsolution.p, window, assignprob, 
                                                       subtractwindow)
-        
-
-
+                
         relist = [] 
         
         # populate RINGexperiment objects
-        for p in xrange(self.BMsolution.pdim):
-            
-            ring = RINGexperiment(arraysize=self.seqlen, corrtype=corrtype, verbal=verbal)
+        # handle N7 rings
+        if self.concat:
+          for p in xrange(self.BMsolution.pdim):
+              
+              ring = RINGexperiment(fasta=fasta, arraysize=self.seqlen, corrtype=corrtype, verbal=verbal, concat=concat, N7=N7)
 
-            ring.sequence = self.sequence
+              if N7:
+                  indices_to_remove = [x for x in range(0, (len(self.sequence)/2))]
+                  ring.sequence = self.sequence[:len(self.sequence)/2]
+                  toignore = [x -( len(self.sequence) / 2) for x in self.invalid_columns if x >= len(self.sequence)/2]
 
-            ring.window = window
-            ring.ex_readarr = read[p]
-            ring.ex_comutarr = comut[p]
-            ring.ex_inotjarr = inotj[p]
-            
-            # fill bg arrays (only need to do once; copy for >0 models)
-            if bgfile is not None:
-                if p==0:
-                    ring.initDataMatrices('bg', bgfile, window=window, 
-                                          mincoverage=self.minreadcoverage, verbal=verbal)
-                else:
-                    ring.bg_readarr = relist[0].bg_readarr
-                    ring.bg_comutarr = relist[0].bg_comutarr
-                    ring.bg_inotjarr = relist[0].bg_inotjarr
-            
-            ring.computeCorrelationMatrix(mincount=mincount, verbal=verbal, ignorents=self.invalid_columns)
-            
-            #ring.writeDataMatrices('ex', 't-{}-{}-{}-{}'.format(p,subtractwindow,assignprob,montecarlo))
+              elif concat:
+                  indices_to_remove = np.intp([])
+                  ring.sequence = self.sequence[:len(self.sequence)/2]
+                  toignore = self.invalid_columns
 
-            relist.append(ring)
+              else:
+                  indices_to_remove = [x for x in range(len(self.sequence)/2, len(self.sequence)+1)]
+                  ring.sequence = self.sequence[:len(self.sequence)/2]
+                  toignore = [x for x in self.invalid_columns if x < len(self.sequence)/2]
+
+              cur_read = np.copy(self.ring_read[p])
+              cur_comut = np.copy(self.ring_comut[p])
+              cur_inotj = np.copy(self.ring_inotj[p])
+              
+              for elem in [0, 1]:
+                cur_read = np.delete(cur_read, indices_to_remove, axis=elem)
+                cur_comut = np.delete(cur_comut, indices_to_remove, axis=elem)
+                cur_inotj = np.delete(cur_inotj, indices_to_remove, axis=elem)
+              
+              
+              ring.window = window
+              ring.ex_readarr = cur_read
+              ring.ex_comutarr = cur_comut
+              ring.ex_inotjarr = cur_inotj
+              
+              # fill bg arrays (only need to do once; copy for >0 models)
+              if bgfile is not None:
+                  if p==0:
+                      ring.initDataMatrices('bg', bgfile, window=window, 
+                                            mincoverage=self.minreadcoverage, verbal=verbal)
+                  else:
+                      ring.bg_readarr = relist[0].bg_readarr
+                      ring.bg_comutarr = relist[0].bg_comutarr
+                      ring.bg_inotjarr = relist[0].bg_inotjarr
+              
+              ring.computeCorrelationMatrix(mincount=mincount, verbal=verbal, ignorents=toignore)
+              
+  
+              relist.append(ring)
         
+        else:
+          for p in xrange(self.BMsolution.pdim):
+              
+              ring = RINGexperiment(arraysize=self.seqlen, corrtype=corrtype, verbal=verbal)
+  
+              ring.sequence = self.sequence
+  
+              ring.window = window
+              ring.ex_readarr = self.ring_read[p]
+              ring.ex_comutarr = self.ring_comut[p]
+              ring.ex_inotjarr = self.ring_inotj[p]
+              
+              # fill bg arrays (only need to do once; copy for >0 models)
+              if bgfile is not None:
+                  if p==0:
+                      ring.initDataMatrices('bg', bgfile, window=window, 
+                                            mincoverage=self.minreadcoverage, verbal=verbal)
+                  else:
+                      ring.bg_readarr = relist[0].bg_readarr
+                      ring.bg_comutarr = relist[0].bg_comutarr
+                      ring.bg_inotjarr = relist[0].bg_inotjarr
+              
+              ring.computeCorrelationMatrix(mincount=mincount, verbal=verbal, ignorents=self.invalid_columns)
+              
+              relist.append(ring)
 
         if verbal: print('\n')
 
@@ -999,7 +1275,7 @@ class DanceMap(object):
  
 
     def _null_RINGs(self, window=1, corrtype='g', assignprob=0.9, mincount=10,
-                    subtractwindow=True, montecarlo=False, verbal=False):
+                    subtractwindow=True, montecarlo=False, verbal=False, N7=False, concat=False, fasta=None):
         """Create null (uncorrelated) model and assign reads based on posterior prob 
         to determine null-model correlations. 
         Returns list of RINGexperiment objs
@@ -1031,6 +1307,7 @@ class DanceMap(object):
         
         # fill in the matrices
         if montecarlo:
+            
             if verbal:
                 print('Using MC for null RING read assignment')
             
@@ -1038,39 +1315,80 @@ class DanceMap(object):
             read, comut, inotj = aFunc.fillRINGMatrix_montecarlo(nullEM.reads, nullEM.mutations, activestatus,
                                                                  mu, self.BMsolution.p, 
                                                                  window, self.reads.shape[0], subtractwindow)
+            
         else:
             if verbal:
                 print('Using {:.3f} as posterior prob for null RING read assignment'.format(assignprob))
 
-            read, comut, inotj = aFunc.fillRINGMatrix(nullEM.reads, nullEM.mutations, activestatus,
+            if self.null_read is None and self.null_comut is None and self.null_inotj is None:
+                self.null_read, self.null_comut, self.null_inotj = aFunc.fillRINGMatrix(nullEM.reads, nullEM.mutations, activestatus,
                                                       mu, self.BMsolution.p, window, assignprob, 
                                                       subtractwindow)
+                
  
 
         relist = []
 
         # populate RINGexperiment objects
-        for p in xrange(self.BMsolution.pdim):
+        if self.concat:
+          for p in xrange(self.BMsolution.pdim):
+  
+              ring = RINGexperiment(arraysize=self.seqlen, corrtype=corrtype, verbal=verbal)
 
-            ring = RINGexperiment(arraysize=self.seqlen, corrtype=corrtype, verbal=verbal)
-
-            ring.sequence = self.sequence
-
-            ring.window = window
-            ring.ex_readarr = read[p]
-            ring.ex_comutarr = comut[p]
-            ring.ex_inotjarr = inotj[p]
-            
-            ring.computeCorrelationMatrix(mincount=mincount, ignorents=self.invalid_columns, verbal=verbal)
-            #ring.writeDataMatrices('ex', 'null-{}.txt'.format(p))
-            relist.append(ring)
+              if N7:
+                  indices_to_remove = [x for x in range(0, (len(self.sequence)/2))]
+                  ring.sequence = self.sequence[:(len(self.sequence)/2)]
+                  #get nts to ignore in N7 only, divide by 2 to adjust frame
+                  toignore = [x - (len(self.sequence) / 2) for x in self.invalid_columns if x >= len(self.sequence)/2]
+              elif concat:
+                  indices_to_remove = np.intp([])
+                  ring.sequence = self.sequence
+                  toignore = self.invalid_columns
+              else:
+                  indices_to_remove = [x for x in range(len(self.sequence)/2, len(self.sequence)+1)]
+                  ring.sequence = self.sequence[:(len(self.sequence)/2)]
+                  toignore = [x for x in self.invalid_columns if x < len(self.sequence)/2]
+                  
+              cur_read = np.copy(self.null_read[p])
+              cur_comut = np.copy(self.null_comut[p])
+              cur_inotj = np.copy(self.null_inotj[p])
+              
+              
+              for elem in [0, 1]:
+                  cur_read = np.delete(cur_read, indices_to_remove, axis=elem)
+                  cur_comut = np.delete(cur_comut, indices_to_remove, axis=elem)
+                  cur_inotj = np.delete(cur_inotj, indices_to_remove, axis=elem)
+              
+              
+              ring.window = window
+              ring.ex_readarr = cur_read
+              ring.ex_comutarr = cur_comut
+              ring.ex_inotjarr = cur_inotj
+  
+               
+              ring.computeCorrelationMatrix(mincount=mincount, ignorents=toignore, verbal=verbal)
+              relist.append(ring)
+        else:
+          for p in xrange(self.BMsolution.pdim):
+  
+              ring = RINGexperiment(arraysize=self.seqlen, corrtype=corrtype, verbal=verbal)
+  
+              ring.sequence = self.sequence
+              
+              ring.window = window
+              ring.ex_readarr = self.null_read[p]
+              ring.ex_comutarr = self.null_comut[p]
+              ring.ex_inotjarr = self.null_inotj[p]
+              
+              ring.computeCorrelationMatrix(mincount=mincount, ignorents=self.invalid_columns, verbal=verbal)
+              relist.append(ring)
             
         return relist
 
 
 
     def computeRINGs(self, window=1, bgfile=None, assignprob=0.9, mincount=10,
-                     subtractwindow=True, montecarlo=False, nulldifftest=True, verbal=True):
+                     subtractwindow=True, montecarlo=False, nulldifftest=True, verbal=True, N7=False, concat=False, fasta=None):
         """Compute RINGs based on posterior prob and mask out (i,j) pairs that are
         observed in null (uncorrelated) model. 
         Return list of RINGexperiment objects
@@ -1082,11 +1400,15 @@ class DanceMap(object):
         subtractwindow = exclude nt window when assigning read for that window
         montecarlo = sample reads using MC logic
         verbal     = verbal"""
- 
+        if self.concat:
+            length = len(self.sequence) / 2
+        else:
+            length = len(self.sequence)
+
 
         # compute rings from experimental data
         sample = self._sample_RINGs(window=window, bgfile=bgfile, assignprob=assignprob, mincount=mincount,
-                                    subtractwindow=subtractwindow, montecarlo=montecarlo, verbal=verbal) 
+                                    subtractwindow=subtractwindow, montecarlo=montecarlo, verbal=verbal, N7=N7, concat=concat, fasta=fasta)
         
         if not nulldifftest:
             return sample
@@ -1094,7 +1416,7 @@ class DanceMap(object):
 
         # compute correlations from null model (clustering only w/o correlations)
         null = self._null_RINGs(window=window, assignprob=assignprob, mincount=10,
-                                subtractwindow=subtractwindow, montecarlo=montecarlo) 
+                                subtractwindow=subtractwindow, montecarlo=montecarlo, N7=N7, concat=concat, fasta=fasta) 
 
 
 
@@ -1121,7 +1443,7 @@ class DanceMap(object):
             sample_p = sample[p]
             null_p = null[p]
             
-            for i,j in itertools.combinations(range(self.seqlen), 2):
+            for i,j in itertools.combinations(range(length), 2):
 
                 nulldiff = sample_p.significantDifference(i,j, null_p.ex_readarr[i,j], null_p.ex_inotjarr[i,j],
                                                           null_p.ex_inotjarr[j,i], null_p.ex_comutarr[i,j])
@@ -1156,6 +1478,70 @@ class DanceMap(object):
                 out.write('\n')
 
 
+####################################################################################
+
+# Concat file helper functions
+def cleanup(*args): 
+    for f in args: os.remove(f)
+
+def check_any_missing(*files):
+    if not all(os.path.exists(f) for f in files):
+        raise ValueError("Error: " + ", ".join(files) + " not located in the same directory.")
+
+def insert_prefix(prefix, name):
+        if "/" in prefix:
+            spl_path = prefix.split("/")
+            prefix = "/".join(spl_path[:-1])
+            return prefix + "/" + name + spl_path[-1]
+        else:
+            return name + prefix
+
+def make_fasta(profile, fasta, fa_name):
+        with open(fasta, "w") as fasta_f:
+            N1_profile = ReactivityProfile(profile)
+            fasta_f.write('>{}\n'.format(fa_name))
+            fasta_f.write(''.join(N1_profile.sequence))
+
+def make_concatenated_N7_files(modified_parsed, untreated_parsed, profile):
+    mod_mut = args.modified_parsed
+    mod_mutga = mod_mut + "ga"
+    prof_txt = args.profile
+    prof_txtga = prof_txt + "ga"
+    unt_mut = None
+    unt_mutga = None
+    
+
+    # Ensure .mut and .mutga / .txt and .txtga are located in the same folder
+    check_any_missing(mod_mut, mod_mutga)
+    check_any_missing(prof_txt, prof_txtga)
+
+    # Enables proper temp file production in cases where user passes the prefix as a path instead of
+    # a simple string. ie "/path/prefix" instead of "prefix"
+    mod_output = insert_prefix(args.outputprefix + ".mut", ".temp_mod_concat_")
+    prof_output = insert_prefix(args.outputprefix + ".txt" , ".temp_prof_concat_")
+    fasta_output = insert_prefix(args.outputprefix + ".fa" , ".temp_fasta_")
+    
+
+    # Concats the .mut and .mutga as well as .txt and .txtga files together into temp files informed
+    # by user defined prefix
+    concat_prof_mut.concat_mut(mod_mut[:mod_mut.index(".")], mod_output, prof_txt[:prof_txt.index(".")])
+    concat_prof_mut.concat_profile(prof_txt[:prof_txt.index(".")], prof_output)
+
+    # Create a temp fasta to from the profile provided to satisfy N7 ring dependency
+    make_fasta(args.profile, fasta_output, prof_txt[:prof_txt.index(".")])
+
+
+    # Create temp file for untreated .mut and .mutga if applicable
+    if args.untreated_parsed:
+        unt_output = insert_prefix(args.outputprefix + ".mut", ".temp_unt_concat_")
+        unt_mut = args.untreated_parsed
+        unt_mutga = unt_mut + "ga"
+
+        check_any_missing(unt_mut, unt_mutga)
+        concat_prof_mut.concat_mut(unt_mut[:unt_mut.index(".")], unt_output, prof_txt[:prof_txt.index(".")])
+
+
+    return mod_output, unt_output, prof_output, fasta_output
 
     
 ####################################################################################
@@ -1232,6 +1618,10 @@ def parseArguments():
     optional.add_argument('--oldDMSnorm', action='store_true', help='Use old style (pre-eDMS) normalization')
     optional.add_argument('--suppressverbal', action='store_false', help='Suppress verbal output')
     optional.add_argument('--outputprefix', type=str, default='emfit', help='Write output files with this prefix (default=emfit)')
+
+    optional.add_argument('--concat', action='store_true', default=False, help='Concatenate mut and mutga files together internally for processing. Must place .mut and .mutga files as well as profile.txt and .txtga files in same directory.')
+
+    optional.add_argument('--activate_n7', action='store_true', default=False, help='Flag to activate N7 columns during DanceMap clustering. Default = False.')
     
 
     parser._action_groups.append(optional)
@@ -1272,13 +1662,6 @@ def parseArguments():
     return args
 
 
-
-
-
-
-
-
-
 if __name__=='__main__':
     
     # Log file messaging for keeping track of run info
@@ -1294,18 +1677,35 @@ if __name__=='__main__':
     args = parseArguments()
     print('Arguments = {}\n\n'.format(args))
 
+    if args.concat:
+        mod_output, unt_output, prof_output, fasta_output = make_concatenated_N7_files(args.modified_parsed, args.untreated_parsed, args.profile)
+        # Modify DM call to accomodate concatenated files
+        DM = DanceMap(modfile=mod_output, untfile=unt_output,
+                         profilefile=prof_output, 
+                         minrxbg = args.minrxbg,
+                         maskG = args.maskG,
+                         maskU = args.maskU,
+                         maskN = args.maskN,
+                         concat=args.concat,
+                         minreadcoverage=args.mincoverage, 
+                         undersample=args.undersample,
+                         ignorebg=args.ignore_untreated,
+                         verbal=args.suppressverbal,
+                         inactivate_n7= not args.activate_n7
+                         )
+    else:
+       DM = DanceMap(modfile=args.modified_parsed, untfile=args.untreated_parsed,
+                        profilefile=args.profile, 
+                        minrxbg = args.minrxbg,
+                        maskG = args.maskG,
+                        maskU = args.maskU,
+                        maskN = args.maskN,
+                        minreadcoverage=args.mincoverage, 
+                        undersample=args.undersample,
+                        ignorebg=args.ignore_untreated,
+                        verbal=args.suppressverbal)
 
-    DM = DanceMap(modfile=args.modified_parsed, untfile=args.untreated_parsed,
-                     profilefile=args.profile, 
-                     minrxbg = args.minrxbg,
-                     maskG = args.maskG,
-                     maskU = args.maskU,
-                     maskN = args.maskN,
-                     minreadcoverage=args.mincoverage, 
-                     undersample=args.undersample,
-                     ignorebg=args.ignore_untreated,
-                     verbal=args.suppressverbal)
-       
+    
     if args.fit:
         
         DM.findBestModel(args.maxcomponents, trials=args.trials,
@@ -1314,8 +1714,15 @@ if __name__=='__main__':
                          verbal=args.suppressverbal,
                          writeintermediate = args.writeintermediates)
 
-        DM.writeReactivities(args.outputprefix+'-reactivities.txt', oldDMS=args.oldDMSnorm)
-        DM.BMsolution.writeModel(args.outputprefix+'.bm')
+        if args.concat:
+           DM.BMsolution.writeModel(args.outputprefix+'-concat.bm')
+           DM.writeReactivities(args.outputprefix+'-concat-reactivities.txt', oldDMS=args.oldDMSnorm, concat=args.concat)
+           de_cat.decat_react(args.outputprefix+'-concat-reactivities.txt', args.outputprefix+'-N13-reactivities.txt', args.outputprefix+'-N7-reactivities.txt')
+           de_cat.decat_bm(args.outputprefix+'-concat.bm', args.outputprefix+'-N13.bm', args.outputprefix+'-N7.bm')
+
+        else:
+           DM.writeReactivities(args.outputprefix+'-reactivities.txt', oldDMS=args.oldDMSnorm)
+           DM.BMsolution.writeModel(args.outputprefix+'.bm')
 
 
 
@@ -1327,12 +1734,16 @@ if __name__=='__main__':
                           verbal = args.suppressverbal, 
                           writeintermediate = args.writeintermediates,
                           forcefit = True)
-
-        DM.writeReactivities(args.outputprefix+'-reactivities.txt', oldDMS=args.oldDMSnorm)
-        DM.BMsolution.writeModel(args.outputprefix+'.bm')
-
     
+        if args.concat:
+           DM.BMsolution.writeModel(args.outputprefix+'-concat.bm')
+           DM.writeReactivities(args.outputprefix+'-concat-reactivities.txt', oldDMS=args.oldDMSnorm, concat=args.concat)
+           de_cat.decat_react(args.outputprefix+'-concat-reactivities.txt', args.outputprefix+'-N13-reactivities.txt', args.outputprefix+'-N7-reactivities.txt')
+           de_cat.decat_bm(args.outputprefix+'-concat.bm', args.outputprefix+'-N13.bm', args.outputprefix+'-N7.bm')
 
+        else:
+           DM.writeReactivities(args.outputprefix+'-reactivities.txt', oldDMS=args.oldDMSnorm)
+           DM.BMsolution.writeModel(args.outputprefix+'.bm')
 
 
     elif args.readfromfile is not None:
@@ -1345,19 +1756,31 @@ if __name__=='__main__':
         if args.suppressverbal:
                 print('--------------Computing RINGs--------------')
 
+        if args.concat:
+            N1_RE_list = DM.computeRINGs(window=args.window, bgfile=args.untreated_parsed, subtractwindow=args.inclwindow, mincount=args.mincount, assignprob=args.readprob_cut, verbal=args.suppressverbal)
+            N1N7_RE_list = DM.computeRINGs(fasta=fasta_output, bgfile=unt_output, subtractwindow=args.inclwindow, mincount=args.mincount, assignprob=args.readprob_cut, verbal=args.suppressverbal, concat=args.concat )
+            N7_RE_list = DM.computeRINGs(bgfile=args.untreated_parsed + "ga", subtractwindow=args.inclwindow, mincount=args.mincount, assignprob=args.readprob_cut, verbal=args.suppressverbal, N7=True)
 
-        RE_list = DM.computeRINGs(window=args.window, bgfile=args.untreated_parsed, subtractwindow=args.inclwindow, mincount=args.mincount,
+            for i,model in enumerate(N1_RE_list):
+                model.writeCorrelations('{}-{}-N1rings.txt'.format(args.outputprefix, i), chi2cut=args.chisq_cut)
+            for i,model in enumerate(N1N7_RE_list):
+                model.writeCorrelations('{}-{}-N1N7rings.txt'.format(args.outputprefix, i), chi2cut=args.chisq_cut)
+            for i,model in enumerate(N7_RE_list):
+                model.writeCorrelations('{}-{}-N7rings.txt'.format(args.outputprefix, i), chi2cut=args.chisq_cut)
+
+        else:
+                RE_list = DM.computeRINGs(window=args.window, bgfile=args.untreated_parsed, subtractwindow=args.inclwindow, mincount=args.mincount,
                                   assignprob=args.readprob_cut, verbal=args.suppressverbal)
 
-        for i,model in enumerate(RE_list):
-            model.writeCorrelations('{0}-{1}-rings.txt'.format(args.outputprefix, i),
+                for i,model in enumerate(RE_list):
+                    model.writeCorrelations('{0}-{1}-rings.txt'.format(args.outputprefix, i),
                                     chi2cut=args.chisq_cut)
 
-
+        #concat rings are computed in 3 separate ring exps N1/N17/N7
 
     if args.pairmap:
         
-        profiles = DM.computeNormalizedReactivities(args.oldDMSnorm)
+        profiles = DM.computeNormalizedReactivities(args.oldDMSnorm, concat=args.concat)
         
         if args.suppressverbal:
                 print('--------------Computing PAIRs--------------')
@@ -1381,6 +1804,10 @@ if __name__=='__main__':
 
 
             
-
+    if args.concat:
+        cleanup(mod_output, prof_output, fasta_output)
+        if args.untreated_parsed:
+            cleanup(unt_output)
+    
 
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
