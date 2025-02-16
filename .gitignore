@@ -1,0 +1,6 @@
+*.pyc
+*.c
+*.so
+*.o
+*egg-info*
+example/*
