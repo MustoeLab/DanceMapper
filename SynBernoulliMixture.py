@@ -2,13 +2,15 @@
 import numpy as np
 import itertools, sys
 
-import externalpaths
-sys.path.append(externalpaths.ringmapper())
-
+# From DanceMapper
 from DanceMapper import DanceMap
 from BernoulliMixture import BernoulliMixture
-from ReactivityProfile import ReactivityProfile
 
+# From StructureAnalysisTools
+try:
+    from ReactivityProfile import ReactivityProfile
+except ImportError:
+    raise ImportError('Could not import ReactivityProfile. Check that StructureAnalysisTools is installed correctly')
 
 
 class SynBernoulliMixture():

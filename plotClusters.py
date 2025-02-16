@@ -1,4 +1,4 @@
-
+#!/usr/bin/env python
 import numpy as np
 
 
@@ -12,13 +12,11 @@ import sys, itertools
 from scipy import stats
 
 from BernoulliMixture import BernoulliMixture
-import externalpaths
-
-sys.path.append(externalpaths.arcplot())
-import arcPlot
-
-sys.path.append(externalpaths.ringmapper())
-from ReactivityProfile import ReactivityProfile
+# From StructureAnalysisTools
+try:
+    from ReactivityProfile import ReactivityProfile
+except ImportError:
+    raise ImportError('StructureAnalysisTools packages not found. Make sure it is installed correctly.')
 
 
 
@@ -385,7 +383,7 @@ def plotClusterComparison(clust1, clust2, name1='', name2='', out=None, align=Fa
  
         
     if out is None:
-        plot.show(fig)
+        plot.show()
     else:
         fig.savefig(out)
 

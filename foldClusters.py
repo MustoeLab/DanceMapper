@@ -1,20 +1,18 @@
-
-
+#!/usr/bin/env python
 import sys, subprocess, argparse, os
 import numpy as np
-import externalpaths
 
+# from DanceMapper
 from plotClusters import RPCluster
 
-
-sys.path.append(externalpaths.arcplot())
-from arcPlot import ArcPlot
-from pmanalysis import PairMap
-
-sys.path.append(externalpaths.rnatools())
-import RNAtools2 as RNAtools
-import foldPK
-
+# from StructureAnalysisTools
+try:
+    from ArcPlot import ArcPlot
+    from pairmap_analysis import PairMap
+    import RNAStructureObjects as RNAtools
+    import foldPK
+except ImportError:
+    raise ImportError('StructureAnalysisTools packages not found. Make sure it is installed correctly.')
 
 
 
@@ -74,23 +72,10 @@ if __name__=='__main__':
 
     args = parseArgs()
 
-    foldpath = externalpaths.rnastructure()+'/Fold'
-    skpath = externalpaths.rnastructure()+'/ShapeKnots'
-    pfunpath = externalpaths.rnastructure()+'/partition'
-    pplotpath = externalpaths.rnastructure()+'/ProbabilityPlot'
- 
-    if not args.pk and not os.path.isfile(foldpath):
-        exit('Path to RNAstructure:fold is invalid! Check directory path in externalpaths!')
-
-    elif args.pk and not os.path.isfile(skpath):
-        exit('Path to RNAstructure:ShapeKnots is invalid! Check directory path in externalpaths!')
-    
-    elif args.prob:
-        if not os.path.isfile(pfunpath):
-            exit('Path to RNAstructure:partition is invalid! Check directory path in externalpaths!')
-        elif not os.path.isfile(pplotpath):
-            exit('Path to RNAstructure:ProbabilityPlot is invalid! Check directory path in externalpaths!')
-
+    foldpath = 'Fold'
+    skpath = 'ShapeKnots'
+    pfunpath = 'partition'
+    pplotpath = 'ProbabilityPlot'
 
     clusters = RPCluster(args.inputReactivity)   
 

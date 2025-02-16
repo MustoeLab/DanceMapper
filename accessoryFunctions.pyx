@@ -31,7 +31,7 @@ def fillReadMatrices(str inputFile, int seqlen, int mincoverage, int undersample
     cdef int i
     
     # open the file
-    cfile = fopen(inputFile, "r")
+    cfile = fopen(inputFile.encode('utf-8'), "r")
     if cfile == NULL:
         raise IOError(2, "No such file or directory: '{0}'".format(inputFile))
 
@@ -60,7 +60,7 @@ def fillReadMatrices(str inputFile, int seqlen, int mincoverage, int undersample
             if r.read == NULL:
                 raise IndexError()
             elif r.stop >= seqlen:
-                print "Skipping line {0} with out-of-array-bounds = ({1}, {2})".format(linenum, r.start, r.stop)
+                print("Skipping line {0} with out-of-array-bounds = ({1}, {2})".format(linenum, r.start, r.stop))
                 continue
 
             mutstr= np.zeros(seqlen, dtype=np.int8) # will contain 1 if mutated
@@ -112,7 +112,7 @@ cdef int fillReadMutArrays(np.int8_t[:] readstr, np.int8_t[:] mutstr, READ r):
     cdef int i, idx
     cdef int coverage = 0
     
-    for i in xrange(r.stop - r.start + 1):
+    for i in range(r.stop - r.start + 1):
         idx = i+r.start       
         readstr[idx] = r.read[i]-r.subcode
         mutstr[idx] = r.muts[i]-r.subcode
@@ -143,7 +143,7 @@ def compute1Dprofile(str inputFile, int seqlen, int mincoverage):
  
 
     # open the file
-    cfile = fopen(inputFile, "r")
+    cfile = fopen(inputFile.encode('utf-8'), "r")
     if cfile == NULL:
         raise IOError(2, "No such file or directory: '{0}'".format(inputFile))
 
@@ -167,11 +167,11 @@ def compute1Dprofile(str inputFile, int seqlen, int mincoverage):
             continue
             
         coverage = 0
-        for i in xrange(r.stop - r.start + 1):
+        for i in range(r.stop - r.start + 1):
             coverage += r.read[i]-r.subcode
             
         if coverage >= mincoverage:
-            for i in xrange(r.stop - r.start + 1):
+            for i in range(r.stop - r.start + 1):
                 idx = i+r.start       
                 readdepth[idx] += r.read[i]-r.subcode
                 mutationrate[idx] += r.muts[i]-r.subcode
@@ -179,7 +179,7 @@ def compute1Dprofile(str inputFile, int seqlen, int mincoverage):
     fclose(cfile)
 
     
-    for i in xrange(seqlen):
+    for i in range(seqlen):
         if readdepth[i] > 0:
             mutationrate[i] /= readdepth[i]
 
@@ -205,23 +205,23 @@ def loglikelihoodmatrix(double[:,::1] loglike, char[:,::1] reads, char[:,::1] mu
     cdef double[:,::1] clogMu = np.empty((modeldim, actlen), dtype=np.float64)
     
 
-    for d in xrange(modeldim):
-        for j in xrange(actlen):
+    for d in range(modeldim):
+        for j in range(actlen):
             col = activecols[j]
             logMu[d,j] = log( mu[d,col] )
             clogMu[d,j] = log( 1-mu[d,col] )
 
     cdef double[:] logp = np.empty(modeldim, dtype=np.float64)
-    for d in xrange(modeldim):
+    for d in range(modeldim):
         logp[d] = log( p[d] )
     
 
-    for d in xrange(modeldim):
-        for i in xrange(numreads):
+    for d in range(modeldim):
+        for i in range(numreads):
             
             loglike[d,i] = logp[d]
 
-            for j in xrange(actlen):
+            for j in range(actlen):
                 col = activecols[j]
                 if mutations[i, col]:
                     loglike[d,i] += logMu[d,j]
@@ -241,10 +241,10 @@ def maximizeP(double[:] p, double[:,::1] readWeights):
     cdef double modelweight
     cdef int numreads = readWeights.shape[1]
     
-    for d in xrange(p.shape[0]):
+    for d in range(p.shape[0]):
 
         modelweight = 0.0
-        for i in xrange(numreads):
+        for i in range(numreads):
             modelweight += readWeights[d,i]
         
         #p[d] = (modelweight + pPrior[d] -1) / (numreads + sumpPrior - modeldim)
@@ -265,24 +265,24 @@ def maximizeMu(double[:,::1] mu, double[:,::1] readWeights,
     cdef int d, i, j, col
     
     #reset mu and add prior to the numerator
-    for d in xrange(modeldim):
-        for j in xrange(actlen):
+    for d in range(modeldim):
+        for j in range(actlen):
             col = activecols[j]
             mu[d,col] = priorA[d,col]
 
     # initialize denominator with priors
     cdef double[:,::1] positionweight = np.zeros((modeldim, actlen))
     
-    for d in xrange(modeldim):
-        for j in xrange(actlen):
+    for d in range(modeldim):
+        for j in range(actlen):
             col = activecols[j]
             positionweight[d,j] = priorA[d,col]+priorB[d,col]
     
     # accumulate numerator and denominator
-    for d in xrange(modeldim):
+    for d in range(modeldim):
 
-        for i in xrange(numreads):
-            for j in xrange(actlen):
+        for i in range(numreads):
+            for j in range(actlen):
                 
                 col = activecols[j]
 
@@ -294,8 +294,8 @@ def maximizeMu(double[:,::1] mu, double[:,::1] readWeights,
     
 
     # do final division
-    for d in xrange(modeldim):
-        for j in xrange(actlen):
+    for d in range(modeldim):
+        for j in range(actlen):
             col = activecols[j]
             mu[d,col] /= positionweight[d,j]
 
@@ -335,8 +335,8 @@ def fillRINGMatrix(char[:,::1] reads, char[:,::1] mutations, char[:] activestatu
     # compute logmu and clogmu
     cdef double[:,::1] logmu = np.zeros((mu.shape[0], mu.shape[1]))
     cdef double[:,::1] clogmu = np.zeros((mu.shape[0], mu.shape[1]))
-    for i in xrange(pdim):
-        for j in xrange(mu.shape[1]):
+    for i in range(pdim):
+        for j in range(mu.shape[1]):
             if mu[i,j] > 0:
                 logmu[i,j] = log( mu[i,j] )
                 clogmu[i,j] = log( 1-mu[i,j] )
@@ -354,7 +354,7 @@ def fillRINGMatrix(char[:,::1] reads, char[:,::1] mutations, char[:] activestatu
     
 
     # traverse over reads
-    for n in xrange(reads.shape[0]):
+    for n in range(reads.shape[0]):
         
         if n%10000==0:
             printf("\r%d",n)
@@ -371,7 +371,7 @@ def fillRINGMatrix(char[:,::1] reads, char[:,::1] mutations, char[:] activestatu
 
         
         # now iterate through all i/j pairs
-        for i in xrange(read_arr.shape[1]-window+1):
+        for i in range(read_arr.shape[1]-window+1):
             
             # compute mut code, and skip if not read at all
             icode = _computeMutCode(reads[n,:], mutations[n,:], i, window)
@@ -380,7 +380,7 @@ def fillRINGMatrix(char[:,::1] reads, char[:,::1] mutations, char[:] activestatu
             # compute weights on read-specific basis
             if subtractwindow:
                 # reset ll_i
-                for m in xrange(pdim):
+                for m in range(pdim):
                     ll_i[m] = loglike[m]
             
                 # subtract window i
@@ -395,7 +395,7 @@ def fillRINGMatrix(char[:,::1] reads, char[:,::1] mutations, char[:] activestatu
 
 
             # increment the diagonal for keeping track of overall mutation rate
-            for m in xrange(pdim):
+            for m in range(pdim):
                 if weights[m] >= assignprob:
                     read_arr[m,i,i] += 1
                     if icode==1:
@@ -403,14 +403,14 @@ def fillRINGMatrix(char[:,::1] reads, char[:,::1] mutations, char[:] activestatu
 
 
 
-            for j in xrange(i+1, read_arr.shape[1]-window+1):
+            for j in range(i+1, read_arr.shape[1]-window+1):
 
                 jcode = _computeMutCode(reads[n,:], mutations[n,:], j, window)
                 if jcode < 0: continue
                 
                 if subtractwindow:
                     # reset ll_ij
-                    for m in xrange(pdim):
+                    for m in range(pdim):
                         ll_ij[m] = ll_i[m]
                 
                     # subtract j
@@ -424,7 +424,7 @@ def fillRINGMatrix(char[:,::1] reads, char[:,::1] mutations, char[:] activestatu
 
 
                 # now iterate through models and increment RING matrices
-                for m in xrange(pdim):
+                for m in range(pdim):
                     
                     # add the read
                     if weights[m] >= assignprob:
@@ -454,8 +454,8 @@ cdef void _subtractloglike(double[:] loglike, int i_index, int window,
     cdef int p,w,index
     
     # subtract off i_index
-    for p in xrange(loglike.shape[0]):
-        for w in xrange(window):
+    for p in range(loglike.shape[0]):
+        for w in range(window):
             index = i_index+w
             if activestatus[index]:
                 if mutation[index]:
@@ -471,11 +471,11 @@ cdef void _loglike2prob(double[:] loglike, double[:] prob):
     cdef double total = 0.0
     cdef int p
 
-    for p in xrange(loglike.shape[0]):
+    for p in range(loglike.shape[0]):
         prob[p] = exp( loglike[p] )
         total += prob[p]
 
-    for p in xrange(loglike.shape[0]):
+    for p in range(loglike.shape[0]):
         prob[p] = prob[p]/total
 
 
@@ -488,7 +488,7 @@ cdef int _computeMutCode(char[:] read, char[:] mutation, int index, int window):
     cdef int rcounter = 0
     cdef int mcounter = 0
 
-    for i in xrange(window):
+    for i in range(window):
         if read[index+i]:
             rcounter+=1
         if mutation[index+i]:
@@ -507,7 +507,7 @@ cdef double _max(double[:] values):
     cdef int p
     cdef double v = 0
 
-    for p in xrange(values.shape[0]):
+    for p in range(values.shape[0]):
         if values[p] > v:
             v=values[p]
 
@@ -521,11 +521,11 @@ cdef void readloglike(double[:] loglike, char[:] activestatus, char[:] read, cha
     
     cdef int p,i
     
-    for p in xrange(logp.shape[0]):
+    for p in range(logp.shape[0]):
         
         loglike[p] = logp[p]
 
-        for i in xrange(logmu.shape[1]):
+        for i in range(logmu.shape[1]):
 
             if activestatus[i]:
                 if mutation[i]:
@@ -569,18 +569,18 @@ def computeInformationMatrix(double[:] p, double[:,::1] mu, double[:,::1] readWe
     cdef double curweight
     
     # iterate over all reads
-    for i in xrange(reads.shape[0]):
+    for i in range(reads.shape[0]):
         
         # complete p portion of svect
-        for d in xrange(ppar1):
+        for d in range(ppar1):
             svect[d] = readWeights[d,i] / p[d] - readWeights[ppar1,i] / p[ppar1]
         
         # compute mu portion of svect
         idx = ppar1
-        for d in xrange(ppar):
+        for d in range(ppar):
             curweight = readWeights[d,i]
 
-            for j in xrange(mupar):
+            for j in range(mupar):
                 col = activecols[j]
 
                 if mutations[i,col]:
@@ -593,13 +593,13 @@ def computeInformationMatrix(double[:] p, double[:,::1] mu, double[:,::1] readWe
                 idx += 1
         
 
-        for idx1 in xrange(imatsize):
+        for idx1 in range(imatsize):
             
             d1 = (idx1 - ppar1) / mupar
 
             curweight = 1-1/readWeights[d1,i]
 
-            for idx2 in xrange(idx1, imatsize):
+            for idx2 in range(idx1, imatsize):
                 
                 d2 = (idx2 - ppar1) / mupar
                 
@@ -615,15 +615,15 @@ def computeInformationMatrix(double[:] p, double[:,::1] mu, double[:,::1] readWe
 
     
     # make transpose
-    for idx1 in xrange(imatsize-1):
-        for idx2 in xrange(idx1+1, imatsize):
+    for idx1 in range(imatsize-1):
+        for idx2 in range(idx1+1, imatsize):
             Imat[idx2, idx1] = Imat[idx1, idx2]
 
     
     # Compute and add Iprior to Imat (only mu terms have prior)
     idx = ppar1
-    for d in xrange(ppar):
-        for j in xrange(mupar):
+    for d in range(ppar):
+        for j in range(mupar):
             col = activecols[j]
             Imat[idx,idx] += (priorA[d,col])/mu[d,col]**2 + (priorB[d,col])/(1-mu[d,col])**2
             idx+=1

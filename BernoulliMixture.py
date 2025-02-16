@@ -1,16 +1,9 @@
-
-
 import numpy as np
 import itertools, sys, copy, time
 from collections import deque
 
-try:
-    import externalpaths
-    sys.path.append(externalpaths.ringmapper())
-    import accessoryFunctions
-except:
-    raise ImportError('Could not import accessoryFunctions! ringmapperpath is not set appropriately in externalpaths')
-
+# from DanceMapper
+import accessoryFunctions
 
 
 class ConvergenceError(Exception):
@@ -454,8 +447,8 @@ class BernoulliMixture(object):
             self.mu = np.copy( self.mu_initial )
 
         # compute params
-        mutsum = np.sum(mutations, axis=0, dtype=np.float_)
-        readsum = np.sum(reads, axis=0, dtype=np.float_)
+        mutsum = np.sum(mutations, axis=0, dtype=np.float64)
+        readsum = np.sum(reads, axis=0, dtype=np.float64)
         
         self.mu[:,activecols] = mutsum[activecols]/readsum[activecols]
         
@@ -666,7 +659,7 @@ class BernoulliMixture(object):
         #if np.max(p_err) > 0.1:
         #    print('\tSolution found:')
         #    msg = '\tP = ['
-        #    for i in xrange(self.pdim):
+        #    for i in range(self.pdim):
         #        msg += ' {0:.3f} +/- {1:.3f},'.format(self.p[i], p_err[i])
         #    print(msg[:-1]+' ]')
         #    raise ConvergenceError('Solution is poorly defined: high P errors', 'END')

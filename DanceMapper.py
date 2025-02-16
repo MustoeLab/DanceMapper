@@ -3,19 +3,24 @@ import numpy as np
 import sys, argparse, itertools
 import datetime
 
-# get path to functions needed for mutstring I/O
-import externalpaths
-sys.path.append(externalpaths.ringmapper())
+# from StructureAnalysisTools
+try:
+    from ReactivityProfile import ReactivityProfile
+except ImportError:
+    raise ImportError('ReactivityProfile not found! Check that StructureAnalysisTools is installed correctly.')
 
+# from RingMapper
+try:
+    from ringmapper import RINGexperiment
+    from pairmapper import PairMapper
+except ImportError:
+    raise ImportError('RINGexperiment and PairMapper not found! Check that RingMapper is installed correctly.')
 
+# from DanceMapper
 import accessoryFunctions as aFunc
 from BernoulliMixture import BernoulliMixture
 
 
-
-from ReactivityProfile import ReactivityProfile
-from ringmapper import RINGexperiment
-from pairmapper import PairMapper
 
 
 
@@ -204,7 +209,7 @@ class DanceMap(object):
 
 
         # Check data to exclude very low rates
-        signal = np.sum(self.mutations, axis=0, dtype=np.float)
+        signal = np.sum(self.mutations, axis=0, dtype=np.float64)
         
         lowsignal = []         
         for i in np.where(signal < invalidrate*self.numreads)[0]:
@@ -720,8 +725,8 @@ class DanceMap(object):
 
     def printEMFitSummary(self, bestfit, fitlist):
          
-        print "\n{0} fits found for {1}-component model".format(len(fitlist), bestfit.pdim)
-        print "Best Fit BIC = {0:.1f}".format( bestfit.BIC )
+        print("\n{0} fits found for {1}-component model".format(len(fitlist), bestfit.pdim))
+        print("Best Fit BIC = {0:.1f}".format( bestfit.BIC ))
         
         print("Deviation of fits from best parameters:")
         
