@@ -10,21 +10,20 @@
 from setuptools import setup, Extension, find_packages
 from Cython.Build import cythonize
 import numpy
-from pathlib import Path
 
-# From RingMapper
-import ringmapper
-
-
-ringmapper_path = str(Path(ringmapper.__file__).parent)
 ext = Extension(
     "accessoryFunctions",
-    sources=["accessoryFunctions.pyx"],
-    include_dirs=[numpy.get_include(), ringmapper_path],
+    sources=["./dancemapper/accessoryFunctions.pyx"],
+    include_dirs=[numpy.get_include()],
 )
 setup(
     name="DanceMapper",
+    packages=find_packages(include=["dancemapper", "dancemapper.*"]),
+    package_dir={"dancemapper": "./"},
     ext_modules=cythonize(ext),
-    scripts=["foldClusters.py", "plotClusters.py", "DanceMapper.py"],
-    packages=find_packages(),
+    scripts=[
+        "./dancemapper/foldClusters.py",
+        "./dancemapper/plotClusters.py",
+        "./dancemapper/DanceMapper.py",
+    ],
 )
