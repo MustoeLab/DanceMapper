@@ -1,24 +1,14 @@
-
+#!/usr/bin/env python
 import numpy as np
 import sys, argparse, itertools
 import datetime
 
-# from StructureAnalysisTools
-try:
-    from ReactivityProfile import ReactivityProfile
-except ImportError:
-    raise ImportError('ReactivityProfile not found! Check that StructureAnalysisTools is installed correctly.')
+from StructureAnalysisTools.ReactivityProfile import ReactivityProfile
+from ringmapper.ringmapper import RINGexperiment
+from ringmapper.pairmapper import PairMapper
 
-# from RingMapper
-try:
-    from ringmapper import RINGexperiment
-    from pairmapper import PairMapper
-except ImportError:
-    raise ImportError('RINGexperiment and PairMapper not found! Check that RingMapper is installed correctly.')
-
-# from DanceMapper
 import accessoryFunctions as aFunc
-from BernoulliMixture import BernoulliMixture
+from dancemapper.BernoulliMixture import BernoulliMixture
 
 
 
@@ -987,7 +977,7 @@ class DanceMap(object):
         verbal     = verbal"""
 
        
-        from SynBernoulliMixture import SynBernoulliMixture
+        from dancemapper.SynBernoulliMixture import SynBernoulliMixture
         
         # initialize synthetic model, ensuring that invalid columns are masked out
         mu = np.copy(self.BMsolution.mu)

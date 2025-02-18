@@ -3,17 +3,12 @@ import sys, subprocess, argparse, os
 import numpy as np
 
 # from DanceMapper
-from plotClusters import RPCluster
+from dancemapper.plotClusters import RPCluster
 
-# from StructureAnalysisTools
-try:
-    from ArcPlot import ArcPlot
-    from pairmap_analysis import PairMap
-    import RNAStructureObjects as RNAtools
-    import foldPK
-except ImportError:
-    raise ImportError('StructureAnalysisTools packages not found. Make sure it is installed correctly.')
-
+from StructureAnalysisTools.ArcPlot import ArcPlot
+from StructureAnalysisTools.pairmap_analysis import PairMap
+import StructureAnalysisTools.RNAStructureObjects as RNAtools
+import StructureAnalysisTools.foldPK as foldPK
 
 
 

@@ -7,7 +7,7 @@ import time
 import numpy as np
 cimport numpy as np
 
-from readMutStrings cimport READ, parseLine, fillReadMut, incrementArrays
+from ringmapper.readMutStrings cimport READ, parseLine, fillReadMut, incrementArrays
 
 
 ###########################################################################

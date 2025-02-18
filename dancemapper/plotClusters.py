@@ -11,13 +11,8 @@ import sys, itertools
 
 from scipy import stats
 
-from BernoulliMixture import BernoulliMixture
-# From StructureAnalysisTools
-try:
-    from ReactivityProfile import ReactivityProfile
-except ImportError:
-    raise ImportError('StructureAnalysisTools packages not found. Make sure it is installed correctly.')
-
+from dancemapper.BernoulliMixture import BernoulliMixture
+from StructureAnalysisTools.ReactivityProfile import ReactivityProfile
 
 
 class Cluster(object):

@@ -6,11 +6,8 @@ import itertools, sys
 from DanceMapper import DanceMap
 from BernoulliMixture import BernoulliMixture
 
-# From StructureAnalysisTools
-try:
-    from ReactivityProfile import ReactivityProfile
-except ImportError:
-    raise ImportError('Could not import ReactivityProfile. Check that StructureAnalysisTools is installed correctly')
+from StructureAnalysisTools.ReactivityProfile import ReactivityProfile
+
 
 
 class SynBernoulliMixture():
