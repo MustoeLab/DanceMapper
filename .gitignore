@@ -1,6 +1,8 @@
+example/*
 *.pyc
 *.c
 *.so
 *.o
 *egg-info*
-example/*
+build/
+__pycache__/
