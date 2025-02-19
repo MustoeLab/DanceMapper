@@ -13,17 +13,17 @@ import numpy
 
 ext = Extension(
     "accessoryFunctions",
-    sources=["./dancemapper/accessoryFunctions.pyx"],
+    sources=["./dance/accessoryFunctions.pyx"],
     include_dirs=[numpy.get_include()],
 )
 setup(
     name="DanceMapper",
-    packages=find_packages(include=["dancemapper", "dancemapper.*"]),
-    package_dir={"dancemapper": "./"},
+    packages=find_packages(include=["dance", "dance.*"]),
+    package_dir={"dance": "./"},
     ext_modules=cythonize(ext),
     scripts=[
-        "./dancemapper/foldClusters.py",
-        "./dancemapper/plotClusters.py",
-        "./dancemapper/DanceMapper.py",
+        "./dance/foldClusters.py",
+        "./dance/plotClusters.py",
+        "./dance/DanceMapper.py",
     ],
 )
