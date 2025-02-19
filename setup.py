@@ -12,14 +12,14 @@ from Cython.Build import cythonize
 import numpy
 
 ext = Extension(
-    "accessoryFunctions",
+    "dance.accessoryFunctions",
     sources=["./dance/accessoryFunctions.pyx"],
     include_dirs=[numpy.get_include()],
 )
 setup(
     name="DanceMapper",
     packages=find_packages(include=["dance", "dance.*"]),
-    package_dir={"dance": "./"},
+    package_dir={"": "./"},
     ext_modules=cythonize(ext),
     scripts=[
         "./dance/foldClusters.py",

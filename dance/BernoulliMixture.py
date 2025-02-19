@@ -2,8 +2,7 @@ import numpy as np
 import itertools, sys, copy, time
 from collections import deque
 
-# from DanceMapper
-import accessoryFunctions
+import dance.accessoryFunctions as accessoryFunctions
 
 
 class ConvergenceError(Exception):
