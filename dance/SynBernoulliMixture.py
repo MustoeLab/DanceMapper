@@ -6,7 +6,7 @@ import itertools, sys
 from DanceMapper import DanceMap
 from BernoulliMixture import BernoulliMixture
 
-from StructureAnalysisTools.ReactivityProfile import ReactivityProfile
+from rnastruct.ReactivityProfile import ReactivityProfile
 
 
 

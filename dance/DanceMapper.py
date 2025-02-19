@@ -3,12 +3,12 @@ import numpy as np
 import sys, argparse, itertools
 import datetime
 
-from StructureAnalysisTools.ReactivityProfile import ReactivityProfile
-from ringmapper.ringmapper import RINGexperiment
-from ringmapper.pairmapper import PairMapper
+from rnastruct.ReactivityProfile import ReactivityProfile
+from smccp.ringmapper import RINGexperiment
+from smccp.pairmapper import PairMapper
 
-import accessoryFunctions as aFunc
-from dancemapper.BernoulliMixture import BernoulliMixture
+import dance.accessoryFunctions as aFunc
+from dance.BernoulliMixture import BernoulliMixture
 
 
 
@@ -977,7 +977,7 @@ class DanceMap(object):
         verbal     = verbal"""
 
        
-        from dancemapper.SynBernoulliMixture import SynBernoulliMixture
+        from dance.SynBernoulliMixture import SynBernoulliMixture
         
         # initialize synthetic model, ensuring that invalid columns are masked out
         mu = np.copy(self.BMsolution.mu)

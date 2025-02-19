@@ -11,8 +11,8 @@ import sys, itertools
 
 from scipy import stats
 
-from dancemapper.BernoulliMixture import BernoulliMixture
-from StructureAnalysisTools.ReactivityProfile import ReactivityProfile
+from dance.BernoulliMixture import BernoulliMixture
+from rnastruct.ReactivityProfile import ReactivityProfile
 
 
 class Cluster(object):

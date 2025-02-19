@@ -3,12 +3,12 @@ import sys, subprocess, argparse, os
 import numpy as np
 
 # from DanceMapper
-from dancemapper.plotClusters import RPCluster
+from dance.plotClusters import RPCluster
 
-from StructureAnalysisTools.ArcPlot import ArcPlot
-from StructureAnalysisTools.pairmap_analysis import PairMap
-import StructureAnalysisTools.RNAStructureObjects as RNAtools
-import StructureAnalysisTools.foldPK as foldPK
+from rnastruct.ArcPlot import ArcPlot
+from rnastruct.pairmap_analysis import PairMap
+import rnastruct.RNAStructureObjects as RNAtools
+import rnastruct.foldPK as foldPK
 
 
 
