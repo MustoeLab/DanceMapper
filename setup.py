@@ -26,4 +26,12 @@ setup(
         "./dance/plotClusters.py",
         "./dance/DanceMapper.py",
     ],
+    install_requires=[
+        "cython",
+        "numpy",
+        "matplotlib",
+        "scipy",
+        "StructureAnalysisTools @ git+ssh://git@github.com/psirving/StructureAnalysisTools.git@python3",
+        "RingMapper @ git+ssh://git@github.com/Weeks-UNC/RingMapper.git@python3",
+    ],
 )

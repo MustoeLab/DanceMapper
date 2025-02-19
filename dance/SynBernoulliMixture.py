@@ -3,8 +3,8 @@ import numpy as np
 import itertools, sys
 
 # From DanceMapper
-from DanceMapper import DanceMap
-from BernoulliMixture import BernoulliMixture
+from dance.DanceMapper import DanceMap
+from dance.BernoulliMixture import BernoulliMixture
 
 from rnastruct.ReactivityProfile import ReactivityProfile
 
