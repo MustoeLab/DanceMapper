@@ -106,6 +106,80 @@ use the following flags:
 --oldDMSnorm --pm_secondary_reactivity 0.5 --mincount 50
 
 
+DanceMapper.py usage related to N7
+--------------
+To use DanceMapper.py to deconvolve N7-G reactivities in addition to traditional N1/3 reactivities
+ShapeMapper 2.3+ must be run with --dms and --N7 flags in addition to the --output-parsed-mutations
+option to produce N7-G related files.
+
+Input:
+    
+    parsed.mut 
+        file output by ShapeMapper
+    
+    profile.txt 
+        file output by ShapeMapper
+    
+    --concat
+        flag directing DanceMapper to concatenate the parsed.mut and parsed.mutga files to deconvolve
+        N7-G reactivities in addition to N1/3 reactivities
+
+*Note* The parsed.mut file must have a corresponding parsed.mutga file located in the same directory.
+Additionally, the profile.txt file must have a corresponding profile.txtga file located in the same
+directory as well. When ShapeMapper 2.3+ is run with the --N7 flag the parsed.mut and profile.txt as
+well as the corresponding parsed.mutga and profile.txtga files are all produced in the same directory
+by default.
+
+Output:
+
+    concat.bm file 
+        save file of the Bernoulli mixture model encompassing both N1/3 and N7-G nucleotides. Only 
+        generated when using the --fit option
+
+    N13.bm file 
+        save file of the Bernoulli mixture model encompassing the N1/3 nucleotides. Only generated 
+        when using the --fit option
+
+    N7.bm file 
+        save file of the Bernoulli mixture model encompassing the N7 nucleotides. Only generated 
+        when using the --fit option
+
+    -concat-reactivities.txt file
+        normalized N1/3 and N7-G reactivities for each structure. Only generated when using the 
+        --fit option
+
+    -N13-reactivities.txt file
+        normalized N1/3 reactivities for each structure. Only generated when using the --fit
+        option
+
+    -N7-reactivities.txt file
+        normalized N7 reactivities for each structure. Only generated when using the --fit
+        option
+
+    [i]-N1rings.txt file
+        N1/3-N1/3 RINGs for state i (window=1). Only generated when using the --ring option
+
+    [i]-N7rings.txt file
+        N7-N7 RINGs for state i (window=1). Only generated when using the --ring option
+        
+    [i]-N1N7rings.txt file
+        N1/3-N7 RINGs for state i (window=1). Only generated when using the --ring option
+       
+
+*Additional Notes*
+--pairmap flag not currently compatible with --concat flag
+
+In order to visualize deconvolved N1/3 and N7-G data it is currently recommended that the 
+dance-reactivites_profile_converter.py script be used. This script will split the
+-concat-reactivities.txt file into profile.txt and profile.txtga files corresponding
+to the states of the deconvolved model. eg:
+
+"python dance-reactivites_profile_converter.py -concat-reactivities.txt --output output_prefix"
+
+These profile files can then be visualized via arcplot.
+
+
+
 foldClusters.py
 ----------------
 Script for performing RNAstructure modeling based on clustered reactivities and plotting results 
